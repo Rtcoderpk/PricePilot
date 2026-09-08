@@ -145,3 +145,34 @@ class ErrorResponse(BaseModel):
     code: str
     message: str
     details: Any | None = None
+
+
+class ShoppingSearchQuery(BaseModel):
+    """Request body for POST /api/v1/shopping/search."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+    use_llm: bool = Field(default=True, description="Allow LLM intent parsing (falls back to deterministic parser when unavailable).")
+
+
+class ShoppingSearchResponse(BaseModel):
+    """The full agent answer envelope for a shopping search."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    request_id: str
+    query: str
+    status: str  # running|completed|partial|failed
+    intent: dict[str, Any] | None = None
+    products: list[dict[str, Any]] = Field(default_factory=list)
+    recommendations: list[dict[str, Any]] = Field(default_factory=list)
+    price_analysis: dict[str, Any] = Field(default_factory=dict)
+    review_analysis: dict[str, Any] = Field(default_factory=dict)
+    seller_analysis: dict[str, Any] = Field(default_factory=dict)
+    deal_scores: dict[str, Any] = Field(default_factory=dict)
+    research_evidence: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    provider_errors: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    answer: str | None = None

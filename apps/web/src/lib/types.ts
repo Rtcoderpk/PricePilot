@@ -70,3 +70,75 @@ export interface ErrorEnvelope {
     details?: unknown;
   };
 }
+
+// ---- AI shopping agent ----
+
+export interface ShoppingIntent {
+  raw_query: string;
+  category?: string | null;
+  product_type?: string | null;
+  brands: string[];
+  budget_min?: number | null;
+  budget_max?: number | null;
+  currency?: string | null;
+  country?: string | null;
+  required_features: string[];
+  preferred_features: string[];
+  excluded_features: string[];
+  quantity?: number | null;
+  condition?: string;
+  use_case?: string | null;
+  ranking_preference?: string;
+  urgency?: string;
+  uncertain_fields: string[];
+}
+
+export interface Recommendation {
+  product_id: string;
+  product_name: string;
+  rank?: number | null;
+  matches_hard_constraints: boolean;
+  reasons: string[];
+  deal_score?: number | null;
+  best_price?: number | null;
+  currency?: string | null;
+  url?: string | null;
+  image_url?: string | null;
+  match_confidence?: number | null;
+}
+
+export interface NonProductDetail {
+  product_id: string;
+  status?: string;
+  positive_themes?: string[];
+  negative_themes?: string[];
+  review_count?: number;
+  label?: string;
+  score?: number | null;
+  reasons?: string[];
+  components?: Record<string, number>;
+  missing_data_warnings?: string[];
+  offer_count?: number;
+  lowest_offer?: number | null;
+  price_position?: string;
+  currency?: string | null;
+  signal_labels?: string[];
+  [k: string]: unknown;
+}
+
+export interface ShoppingAgentResponse {
+  request_id: string;
+  query: string;
+  status: string;
+  intent?: ShoppingIntent | null;
+  products?: ProductResult[];
+  recommendations?: Recommendation[];
+  price_analysis?: Record<string, NonProductDetail>;
+  review_analysis?: Record<string, NonProductDetail>;
+  seller_analysis?: Record<string, NonProductDetail>;
+  deal_scores?: Record<string, NonProductDetail>;
+  warnings?: string[];
+  provider_errors?: string[];
+  confidence?: number;
+  answer?: string | null;
+}

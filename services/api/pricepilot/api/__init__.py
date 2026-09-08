@@ -22,6 +22,7 @@ from pricepilot.logging import get_logger
 from pricepilot.middleware import RequestIDMiddleware
 from pricepilot.rate_limit import RateLimiter
 from pricepilot.services.search import SearchService
+from pricepilot.services.shopping import ShoppingAgentService
 
 log = get_logger("api")
 
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis
     app.state.rate_limiter = RateLimiter(redis)
     app.state.search_service = SearchService(cache=redis)
+    app.state.shopping_service = ShoppingAgentService()
 
     yield
 

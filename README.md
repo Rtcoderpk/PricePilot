@@ -13,20 +13,22 @@ recommendation.
 
 ## What's real right now
 
-- **Live search** — `POST /api/v1/search` queries OpenFoodFacts (real products).
+- **AI Shopping Agent** (Phase 3) — `POST /api/v1/shopping/search` parses intent,
+  searches providers concurrently, deduplicates, analyzes real offers/price/sellers,
+  and ranks explainable recommendations with hard-constraint enforcement.
+  Typed Pydantic state; no unstructured dict. No fabrication. Deterministic fallback
+  when no LLM key is configured.
 - **Canonical product engine** (Phase 2) — raw offers are normalized, identifiers
   extracted (GTIN/barcode), and deterministically matched into deduplicated
-  variant-level products with multiple merchant offers. Variants (pack size,
-  storage, color) are never merged by similar titles.
+  variant-level products with multiple merchant offers.
+- **Live search** — `POST /api/v1/search` queries OpenFoodFacts (real products).
 - **Provider abstraction** — slots for search/AI providers; unconfigured slots
-  are reported as `unavailable`, never simulated. Comma-separated
-  `PRICEPILOT_SEARCH_PROVIDER` enables parallel multi-provider search.
-- **Redis-backed search cache + rate limiting** (cached identical queries ~30× faster).
+  reported as `unavailable`, never simulated.
+- **Redis-backed search cache + rate limiting**.
 - **PostgreSQL schema** (Alembic migrations, pgvector, RLS-ready) via `docker compose`.
 - **FastAPI service + background worker** (Dockerized, health/readiness probes).
-- **Next.js 16 frontend** (App Router, Tailwind, shadcn-style components) with a
-  landing page, canonical search-result cards (best price, store count, "Compare
-  stores" reveal), and placeholders for later phases.
+- **Next.js 16 frontend** — landing, canonical search cards, and `/shopping` AI agent
+  page with intent display, recommendations, deal score, and seller/review status.
 - **GitHub Actions CI** (lint, typecheck, tests, build, security, Docker builds).
 
 ## How to run locally
@@ -66,6 +68,7 @@ docs/             architecture, database, agents, deployment, API, env
 | 0 | Audit + architecture | done |
 | 1 | Foundation | done |
 | 2 | Product intelligence (normalization, matching, dedup, multi-provider) | done |
+| 3 | AI agents (intent → recommendation) | done |
 | 3 | AI agents (intent → recommendation) | planned |
 | 4 | SIBT, chat, image/voice, review intelligence | planned |
 | 5 | Price monitoring, alerts, worker jobs | planned |

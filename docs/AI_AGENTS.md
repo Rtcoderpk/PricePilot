@@ -1,120 +1,174 @@
-# PricePilot — AI AGENTS
+# PricePilot — AI Agents
 
-**Version:** 0.1 (Phase 0 planning baseline) · **Date:** 2026-09-08
+**Version 0.3 (Phase 3)**. The full implementation lives in
+`services/api/pricepilot/agents/`. This doc reflects what is actually built —
+nothing planned-but-fiction.
 
-## 1. Design constraints
+## 1. Design constraints (all enforced)
 
-- **Agentic, but not "free agent."** One explicit DAG. No uncontrolled loops. No "keep going until the model says done."
-- Every agent: typed input state → typed output state → validation → timeout → max-iterations → retry → fallback → structured logging to `agent_events`.
-- **LLM output is never trusted raw.** It is parsed into a Pydantic schema, validated, and on invalid output retried-with-correction (bounded), else fallback.
-- **Numbers come from data, not the model.** Deal Score and BUY/WAIT/AVOID are computed by rules over persisted `product_offers` / `prices` / `reviews` / `sellers` signals. The LLM produces explanations *over those computed values*, never the values themselves.
-- **Uncertainty is surfaced.** Identifications/matches/forecasts carry confidence; missing data is "unknown," never invented.
+- **Agentic, but a single typed graph.** No uncontrolled loops; every node has a
+  timeout, bounded retries, and validation. Nodes run concurrently where safe.
+- **LLM output is never trusted raw.** Structured output is parsed, validated
+  against Pydantic, retried-with-correction (bounded), then a fallback provider;
+  if still invalid the node records a controlled error and the graph continues on
+  deterministic branches.
+- **Numbers come from data, not the model.** Price position, review themes, seller
+  confidence, and Deal Score are derived from real persisted/provider data by
+  deterministic rules. The LLM is only used for **intent parsing** (and optional
+  explanation composition), both validated and bounded.
+- **External text is data, not instructions.** Product titles, descriptions,
+  reviews, and seller text are treated as untrusted content. Intent parsing gets
+  only the user's query. Prompt-injection tests prove this.
+- **Uncertainty is surfaced.** Missing data stays `null` / `unknown` /
+  `insufficient_history` / `review_data_unavailable` — never filled by model
+  knowledge.
 
-## 2. Graph
+## 2. Typed agent state
+
+All agent nodes read/write a single **`AgentState`** (Pydantic) →
+`agents/state.py`. Key fields:
 
 ```
-                        ┌─────────────┐
-    user request ──────▶│ intent      │  structured Requirements
-                        └─────────────┘
-                              │
-                        ┌─────▼──────┐
-                        │ search     │  providers fan-out, normalize
-                        └─────┬──────┘
-                              │ candidates
-                        ┌─────▼──────┐
-                        │ match      │  dedup canonical products + offers
-                        └─────┬──────┘
-                              │ canonical products
-                        ┌─────▼──────┐
-                        │ research   │  specs, features, gaps (no invention)
-                        └─────┬──────┘
-                              │
-              ┌───────┬───────┼────────┬──────────┐
-              ▼       ▼       ▼        ▼
-           price    review  seller   deal-score
-           intel    intel   intel
-              │       │       │        │
-              └───────┴───────┴────────┘
-                              │ signals
-                        ┌─────▼──────┐
-                        │ recommend  │  Deal Score + BUY/WAIT/AVOID + narratives
-                        └─────┬──────┘
-                              │
-                        final structured response
+request_id, user_id, original_query
+intent              ShoppingIntent (structured; see below)
+search_queries      list[str]
+candidate_offers    list[RawOffer]
+canonical_products  list[CanonicalProduct]
+research_evidence   dict[product_id, ResearchEvidence]
+price_analysis      dict[product_id, PriceAnalysis]
+review_analysis     dict[product_id, ReviewAnalysis]
+seller_analysis     dict[product_id, SellerAnalysis]
+deal_scores         dict[product_id, DealScore]
+recommendations     list[Recommendation]
+warnings            list[str]
+provider_errors     list[str]
+confidence          float
+final_answer        str | None
 ```
 
-Branches (`price/review/seller`) run in parallel. `deal-score` consumes their outputs. `recommend` composes the final explanation.
+The state is immutable-ish (builder returns a new state), persisted as JSON to
+`agent_runs.final_state` and per-event to `agent_events.output_state`.
 
-## 3. Agent roles and state contracts
+### ShoppingIntent
 
-Each agent emits a typed Pydantic state. (Full schemas live in `services/ai/agents/schemas.py` in Phase 3; the contract below is authoritative-by-intent.)
+```
+category, product_type, brands[], budget_min, budget_max, currency, country,
+required_features[], preferred_features[], excluded_features[], quantity,
+condition, use_case, ranking_preference, urgency, explicit_preferences
+```
 
-### 3.1 Intent Agent
-- Input: free-text query + optional URL/image meta + session prefs snapshot.
-- Output: `Requirements{ category, currency, budget_min, budget_max, required_specs, preferences[], hard_constraints[], soft_preferences[], locale, condition, brands[] }`.
-- Rules: unknown fields → `null` (never guessed); currency inferred only from explicit signals (symbol/country), never silently defaulted; recognized "gaming laptop under $1200" → category `laptop`, max_budget.
+Every field nullable. Never invented: an unmentioned brand is `None`, not
+"unknown". `raw_uncertain_markers` records ambiguous values the intent parser
+flagged so downstream agents don't assume them.
 
-### 3.2 Search Agent
-- Input: `Requirements`.
-- Output: `SearchCandidates{ raw_offers[] }`, each raw offer = provider, url, title, raw_price, availability.
-- Rules: providers run in parallel, each with deadline; adapter validates per-provider schema; unconfigured providers skipped and recorded.
+## 3. Agents
 
-### 3.3 Product Matching Agent
-- Input: raw offers.
-- Output: `MatchedProducts{ products[], offers[] }` mapping offers → canonical product.
-- Rules: deterministic first (GTIN/UPC/EAN/model/MPN), then normalized-title + attributes, then semantic embeddings only as tiebreak; each match carries `confidence` and `method`; low-confidence → separate candidate row, never force-merged.
+Each node is a small function over `AgentState` → `AgentState`, named:
+`intent`, `search`, `matching`, `research`, `price`, `reviews`, `seller`,
+`deal_score`, `recommendation`.
 
-### 3.4 Research Agent
-- Input: canonical products.
-- Output: `Research{ specs[] }` per product with per-spec `source`, `confidence`; gaps recorded as `missing: true`.
-- Rules: never invent spec values; if a provider returns specs, embed the source; otherwise blank.
+- **intent** — LLM-assisted structured parsing of the user query into
+  `ShoppingIntent` with strict prompt-injection separation. Bounded retries;
+  on provider failure falls back to a deterministic keyword parser (no model).
+- **search** — derives 1–2 queries from intent (brand/category/budget keywords),
+  runs configured SearchProviders **concurrently** with per-provider timeouts,
+  collects `RawOffer`s; gracefully degrades when a provider fails.
+- **matching** — calls the Phase 2 `services.canonical.canonicalize` to dedupe
+  offers into canonical products. **Reuses the phase-2 engine**; variant
+  conflicts and low confidence keep products separate.
+- **research** — gathers real available evidence per product (specs/attributes,
+  brand, quantity, offers, shipping, source) with `source` + `timestamp`; missing
+  fields stay null.
+- **price** — per canonical product computes lowest/highest/avg current offer,
+  offer count, currency; `price_position` = below/around/above recent average
+  **only when history exists**, else `insufficient_history`.
+- **reviews** — from real reviews only (currently none configured in cell data)
+  → returns `review_data_unavailable` honestly. Structure ready for a review
+  provider.
+- **seller** — from real seller/merchant signals present in offers (provider,
+  availability, data_source) → `seller_analysis` with `label` in
+  {`verified_signal`, `limited_information`, `insufficient_data`} + reasons.
+- **deal_score** — deterministic, explainable 0–100 from real signals:
+  price competitiveness, offer count, availability, seller signal, review signal
+  (warned), missing-data warnings. Label ∈ {Excellent, Good, Fair, Weak,
+  Insufficient Data}.
+- **recommendation** — ranks products by intent (hard constraints enforced first,
+  never silently bypassed), returns ordered recommendations each with
+  `reasons[]`. If nothing satisfies hard constraints, explains and offers closest
+  alternatives only where appropriate.
 
-### 3.5 Price Intelligence Agent
-- Input: canonical products + `prices` series.
-- Output: `PriceInsight{ current, lowest_90d, avg_90d, trend (up|down|flat), delta_vs_avg, discount_verified }`.
-- Rules: computed from real `prices` rows only; `current` = latest live offer; no forecast in v1 unless explicitly implemented with range+confidence+methodology (see §6).
+## 4. Node graph (directed acyclic)
 
-### 3.6 Review Intelligence Agent
-- Input: reviews for product (permitted sources only).
-- Output: `ReviewSummary{ positives[], negatives[], common_complaints[], suspicious_patterns[], stars, review_count, source_refs[] }`.
-- Rules: no fabricated reviews; themes extracted from actual text; low volume → "limited data" label; source refs retained where possible.
+```
+intent ──▶ search ──▶ matching ──▶ research
+                                     │
+                  ┌──────────────────┼───────────────────┐
+                  ▼                  ▼                   ▼
+               price             reviews              seller
+                  │                  │                   │
+                  └──────────────────┼───────────────────┘
+                                     ▼
+                                 deal_score
+                                     │
+                                     ▼
+                               recommendation
+```
 
-### 3.7 Seller Intelligence Agent
-- Input: sellers/offers for product.
-- Output: `SellerAssessment{ seller_id, confidence (high|medium|low|limited), signals[] , flag }`.
-- Rules: confidence derives from rating, count, marketplace status, return/warranty data; **never** "fraudulent" label without reliable evidence.
+- `price`, `reviews`, `seller` run **concurrently** after `research`
+  (`asyncio.gather`), bounded by node timeouts.
+- Partial success: if `reviews` fails/empty, price+seller+deal_score complete
+  (review signal reports `unavailable`).
+- Bounded: each node has `max_retries` (default 0 for deterministic,
+  2 for LLM calls) and a timeout; the orchestrator tracks per-run attempts and
+  aborts on a global guard (no infinite loops).
 
-### 3.8 Deal Scoring Agent
-- Input: PriceInsight, ReviewSummary, SellerAssessment, specs, total-cost, user preferences.
-- Output: `DealScore{ overall 0-100, components{ price_value, product_quality, reviews, seller_reliability, total_cost, fit }, rationale[] }`.
-- Rules: weight matrix from preferences (price_vs_quality); every component traceable to a signal with a human-readable reason; no magic numbers.
+## 5. AI provider behavior
 
-### 3.9 Recommendation Agent
-- Input: DealScore + all above.
-- Output: `Recommendation{ verdict (BUY|WAIT|AVOID), reasons[], best_alternative, explainable_notes[] }` (+ optional top-3 comparison).
+`providers/ai/`:
+- **contract**: `AIProvider.generate_structured(prompt, schema) -> BaseModel`,
+  plus `available()`.
+- **OpenAI-compatible** (`openai-compatible`): uses `OPENAI_API_KEY`/`AI_API_KEY`
+  + `AI_MODEL` + `AI_BASE_URL`; `response_format=json_object` where supported.
+- **Ollama** (`ollama`): local HTTP to `OLLAMA_BASE_URL` with `format=json`.
+- **Noop**: honest unavailable — `available()=False`, raises controlled error.
+- Registry resolves `AI_PROVIDER`; `AI_API_KEY` absent → Noop; nothing fakes an
+  LLM.
+- Structured-output pipeline (`agents/structured.py`): request → parse → validate
+  (Pydantic) → on invalid, bounded corrected retry → fallback provider → final
+  controlled `StructuredOutputError`. Never `json.loads` unchecked; never exposes
+  raw model text or secrets.
 
-## 4. Reliability controls
+## 6. Persistence
 
-- Global executor: per-node `timeout_s`, `max_retries` (exponential backoff), circuit-break by provider, structured error taxonomy (`intent`, `search`, ... error codes).
-- Malformed AI output → retry-with-correction (bounded, 2), else fallback (deterministic rule or explicit "unavailable").
-- Concurrency: parallel branches capped; provider fan-out bounded by adapter limits.
-- Logging: every node records `{run_id, node, status, latency_ms, input_state_hash, validation}`; cost metrics tracked per node.
+- `agent_runs`: one per shopping request (status `running` → `completed`/`failed`,
+  `graph_name="shopping_intelligence"`, `final_state` JSON).
+- `agent_events`: one per node transition (`agent`, `status`, `sequence`,
+  `input_state`/`output_state` JSON, `latency_ms`). Writes are best-effort; a DB
+  failure must not crash the request.
 
-## 5. Provider strategy (AI)
+## 7. API
 
-- Interface: `AIProvider.generate_structured(prompt, output_schema) -> ValidatedModel`.
-- Config: `AI_PROVIDER` (`openai-compatible` default to `gpt-*`/`o1-*`; `ollama` for local/self-hosted), `AI_MODEL`, `AI_TEMPERATURE`, `AI_MAX_TOKENS`.
-- **No key in env → provider marked unavailable**; app, worker, and chat degrade gracefully with an honest "AI provider not configured" instead of pretending.
-- Provider failures → retry/backoff → fallback path → user-visible, non-exposure message.
-- Reduce cost: preferences/brand constraints hit deterministic SQL before any LLM; semantic search only where it earns its inference spend.
+- `POST /api/v1/shopping/search` — body `{query, max_products?}`; returns the
+  full structured answer envelope (see API.md). Same error envelope; Redis rate
+  limit applied (same 30/min/IP budget as `/search`).
+- `POST /api/v1/shopping/chat` — reserved for multi-turn (Phase 4); returns
+  controlled "not implemented" today.
 
-## 6. Forecasting (only if/when implemented)
+## 8. Security
 
-If a price-forecast feature ships, it will:
-- Show range + confidence interval + methodology ("ARIMA over 90d of real samples" or similar), clearly communicate it is a model, not a guarantee.
-- Never present a point-prediction as fact; include uncertainty; no forecasting over <N samples (configurable, default ≥30) — else "insufficient history."
+- No secrets in state/events. `agent_events` stores **news that doesn't include
+  the model prompt**; only inputs/outputs of nodes.
+- External content (titles, descriptions, reviews, seller text) is isolated from
+  any instruction context — intent and explanation prompts include only the user
+  query and typed facts.
+- Tests: prompt-injection via product title, review, and seller text must not
+  change intent or recommendation output.
 
-## 7. Explanation & auditability
+## 9. Known limitations (noted honestly for Phase 4)
 
-- Every Deal Score and SIBT verdict must be reproducible from `agent_runs` + `agent_events` (the consumer can replay a previous run).
-- Explanations cite the actual sources: "current price $899 is ~10% below 90d avg $999 (data: prices table, 90d)".
+- No real review data source is configured, so `reviews` returns
+  `review_data_unavailable` by default. The node and schema are production-ready.
+- Intent parsing needs an LLM key to reach full fidelity; without one it uses the
+  deterministic parser (still typed and valid, lower recall). This is surfaced in
+  `warnings`/`provider_errors`.
+- `shopping/chat` multi-turn and image/voice shopping are intentionally Phase 4.

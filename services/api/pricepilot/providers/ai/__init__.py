@@ -1,8 +1,8 @@
 """AI provider contract for structured generation.
 
-In Phase 1 the contract exists so the agent graph can type-check and run with a
-honest no-op when no API key is configured. Real implementations (openai-
-compatible, ollama) attach in Phase 3.
+Every AI provider returns *validated* Pydantic output and never raw text. An
+"unavailable" provider is honest (`available()==False`), letting the structured
+pipeline delegate to the fallback or a controlled degrade.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ class AIProvider(ABC):
 
     @abstractmethod
     async def available(self) -> bool:
-        """Whether an LLM backend is configured."""
+        """Whether an LLM backend is configured and usable."""
 
     @abstractmethod
     async def generate_structured(
@@ -31,8 +31,8 @@ class AIProvider(ABC):
     ) -> BaseModel:
         """Generate output conforming to `schema`.
 
-        Implementations must validate against `schema` and raise provider
-        errors on malformed output rather than returning raw text.
+        Implementations MUST validate against `schema` and raise ProviderError on
+        malformed/invalid output rather than returning raw text.
         """
 
 
@@ -55,4 +55,8 @@ class NoopAIProvider(AIProvider):
         *,
         max_tokens: int | None = None,
     ) -> BaseModel:
-        raise NotImplementedError("AI provider not configured; callers must use available()")
+        from pricepilot.errors import ProviderUnavailableError
+
+        raise ProviderUnavailableError(
+            "ai", "No AI provider is configured (set AI_PROVIDER and AI_API_KEY)."
+        )

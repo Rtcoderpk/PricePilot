@@ -9,6 +9,7 @@ Base: `http://localhost:8000` (dev) · OpenAPI schema at `/docs`.
 | GET | `/health` | Liveness probe (200 when process is up) |
 | GET | `/readyz` | Readiness (DB required, Redis degradable) |
 | POST | `/api/v1/search` | Run a shopping search |
+| POST | `/api/v1/shopping/search` | Run the full AI shopping agent |
 
 ## `POST /api/v1/search`
 
@@ -89,6 +90,40 @@ All errors return a single envelope:
 | `internal_error` | 500 | Internal failure (no stack traces exposed) |
 
 Requests carry an `X-Request-Id` (echoed in responses) for log correlation.
+
+---
+
+## `POST /api/v1/shopping/search`
+
+The AI shopping agent: parses intent, searches providers, canonicalizes products, analyzes real price/seller/review data, scores deals, and ranks recommendations.
+
+Request:
+```json
+{ "query": "good 55 inch Samsung TV under 700", "use_llm": true }
+```
+- `query` (string, 1–500) required
+- `use_llm` (bool, default true) — falls back to deterministic intent parser when AI key is missing
+
+Response `200`:
+```json
+{
+  "request_id": "req-…",
+  "query": "good 55 inch Samsung TV under 700",
+  "status": "completed",
+  "intent": { "category": "TV", "budget_max": 700, "brands": ["samsung"], … },
+  "products": [ { "canonical_product_id": "pp_…", "name": "…", "offers": [ … ], … } ],
+  "recommendations": [
+    { "product_id": "pp_…", "rank": 1, "matches_hard_constraints": true,
+      "reasons": [ "within your budget (best 699.00)" ], "deal_score": 81, … }
+  ],
+  "price_analysis": { "pp_…": { "lowest_offer": 699, "price_position": "insufficient_history" } },
+  "seller_analysis": { "pp_…": { "label": "verified_signal", "signals": ["available"] } },
+  "deal_scores": { "pp_…": { "score": 81, "label": "Good Deal", "components": { "price_value": 60, … } } },
+  "warnings": [ "No review provider configured" ],
+  "confidence": 0.56,
+  "answer": "Best match: Samsung 55\" QLED (best 699.00) (Deal Score 81/100)"
+}
+```
 
 ## Architecture note
 

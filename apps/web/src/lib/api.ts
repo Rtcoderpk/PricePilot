@@ -1,4 +1,4 @@
-import type { SearchResponse, ErrorEnvelope } from "./types";
+import type { SearchResponse, ErrorEnvelope, ShoppingAgentResponse } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -45,6 +45,16 @@ export async function searchProducts(
     cache: "no-store",
   });
   return parseResponse<SearchResponse>(res);
+}
+
+export async function shoppingSearch(query: string): Promise<ShoppingAgentResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/shopping/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, use_llm: true }),
+    cache: "no-store",
+  });
+  return parseResponse<ShoppingAgentResponse>(res);
 }
 
 export async function getHealth(): Promise<{ status: string }> {
