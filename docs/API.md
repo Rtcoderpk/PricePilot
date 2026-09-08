@@ -12,6 +12,17 @@ Base: `http://localhost:8000` (dev) · OpenAPI schema at `/docs`.
 | POST | `/api/v1/shopping/search` | Run the full AI shopping agent |
 | POST | `/api/v1/shopping/chat` | Multi-turn shopping chat (session-persisted) |
 | POST | `/api/v1/shopping/image` | Upload a product image → possible matches |
+| GET | `/api/v1/monitoring/status` | Monitoring capability state (enabled/provider/count/message) |
+| GET | `/api/v1/price-history/{product_id}` | Real recorded price observations + analytics |
+| POST | `/api/v1/tracking` | Track a product (target price optional); 409-free duplicate → `already_tracked` |
+| GET | `/api/v1/tracking` | List the caller's tracked products |
+| GET | `/api/v1/tracking/{watchlist_id}` | One tracked product (404 if not the caller's) |
+| PATCH | `/api/v1/tracking/{watchlist_id}` | Update target/preferences/pause (404 if not the caller's) |
+| DELETE | `/api/v1/tracking/{watchlist_id}` | Remove tracking (204) |
+| GET | `/api/v1/alerts?unread=` | Alert notifications (optionally unread only) |
+| PATCH | `/api/v1/alerts/{notification_id}` | Mark a notification `read`/`dismissed` (owner only) |
+| GET | `/api/v1/preferences` | The caller's shopping preferences (empty when unset) |
+| PUT | `/api/v1/preferences` | Upsert the caller's shopping preferences |
 
 ## `POST /api/v1/search`
 
@@ -155,6 +166,77 @@ and ≤ 5 MB. Without a configured vision provider it returns HTTP 200 with:
 ```
 With a provider it returns `possible matches` with confidence levels.
 
+## Price monitoring (Phase 5)
+
+Identity is deferred (Phase 1 decision): monitoring endpoints accept an
+`X-User-Id` header in place of a JWT; a real auth layer plugs in later. The
+contract today:
+
+- `X-User-Id` **must be a valid UUID** (the schema keeps UUID FKs to
+  `users.id`). A missing header → `401`; a present but malformed value → `400`,
+  never a database 500.
+- A **centralized identity resolver** (`pricepilot.services.identity`)
+  validates the header and **idempotently creates the `users` row** for that
+  UUID on first use, so tracking/alerts/preferences can reference it. Repeated
+  requests are cheap (`ON CONFLICT (id) DO NOTHING`).
+- Every tracking/alert/preference operation is scoped to that resolved UUID —
+  records from other `X-User-Id`s are invisible (and 404 on direct access).
+- When real Supabase authentication lands, the resolver is swapped for one that
+  reads the JWT and returns the authenticated user UUID; routes and the service
+  layer are unchanged. The frontend ships a fixed demo UUID
+  (`11111111-1111-4111-8111-111111111111`) as the local demo identity until then.
+
+### `GET /api/v1/monitoring/status`
+
+```json
+{ "enabled": true, "provider": "available", "interval_seconds": 3600,
+  "tracked_products": 3, "message": null }
+```
+`provider` is `available` only when a real price source (OpenFoodFacts) is
+configured — it will not claim availability without one.
+
+### `POST /api/v1/tracking`
+
+```json
+{ "product_id": "pp_gtin_...", "target_price": 30.0, "target_currency": "EUR",
+  "alert_preferences": { "price_drop": true, "new_low": true, "target_price": true } }
+```
+Returns `201` with `{ "status": "created", "id": "…" }` or `200` with
+`{ "status": "already_tracked", "id": "…" }` when it already exists.
+
+### `GET /api/v1/price-history/{product_id}`
+
+```json
+{ "product_id": "pp_…", "currency": "EUR",
+  "analytics": { "status": "available", "current_price": 45.0, "previous_price": 50.0,
+                 "percentage_change": -10.0, "lowest_observed": 45.0, "trend": "down",
+                 "observation_count": 5 },
+  "observations": [ { "amount": 45.0, "currency": "EUR", "observed_at": "…", "source": "openfoodfacts" } ] }
+```
+All observations are **real recorded polls**; `analytics.status` is
+`insufficient_history` until ≥2 observations exist (never synthetic).
+
+### `GET /api/v1/alerts?unread=true`
+
+```json
+[ { "id": "…", "title": "Price dropped", "body": "Price dropped from 50.00 to 45.00",
+    "status": "unread", "kind": "percent_drop", "product_id": "pp_…",
+    "target_amount": null, "percent_threshold": -10.0,
+    "triggering_offer": { "event_type": "price_drop", "current_price": 45.0,
+                           "previous_price": 50.0, "source": "openfoodfacts", "currency": "EUR" } } ]
+```
+
+### `GET/PUT /api/v1/preferences`
+
+Partial upsert (missing fields are left unchanged). `max_budget: 0` clears the
+budget (the same convention as `PATCH /tracking` target price).
+
+```json
+{ "preferred_brands": ["Acme"], "max_budget": 500,
+  "preferred_stores": ["Store A"], "preferred_condition": ["new", "refurbished"],
+  "price_vs_quality": 0.7, "currency_code": "USD", "shopping_locale": "en-US" }
+```
+
 ## Architecture note
 
 - Multi-agent runs and long scrape work execute in the **API/worker**, never in
@@ -164,3 +246,7 @@ With a provider it returns `possible matches` with confidence levels.
 - `PRICEPILOT_SEARCH_PROVIDER` may be a comma-separated list; providers are
   queried in parallel and results are canonicalized together (dedup across
   providers).
+- Price history is captured by the platform's own worker polling (`prices` is
+  append-only); the monitoring worker observes → dedupes → detects events →
+  persists alerts → optional external delivery, with retry/backoff and a failure
+  per offer never aborting a cycle.

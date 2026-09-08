@@ -53,9 +53,21 @@ the port mappings shown).
 | `PRICEPILOT_VISION_PROVIDER` | *(empty)* | not yet implemented; empty → image upload returns honest "vision not configured" |
 | `PRICEPILOT_REVIEW_PROVIDER` | *(empty)* | not yet implemented; review agent reads real `reviews` rows + theme extraction |
 | `AI_EMBEDDING_MODEL` | *(empty)* | e.g. `text-embedding-3-small` (1536-dim matches the table) |
-| `ALERT_SWEEP_INTERVAL_SECONDS` | `300` | alert sweep cadence (Phase 5) |
-| `PRICE_POLL_INTERVAL_SECONDS` | `3600` | price polling cadence (Phase 5) |
-| `MAX_ALERTS_PER_SWEEP` | `100` | cap per sweep |
+| `MONITOR_ENABLED` | `true` | master switch for the Phase 5 monitoring worker |
+| `MONITOR_POLL_INTERVAL_SECONDS` | `3600` | price polling cadence (1 sample/hour per offer by default) |
+| `MONITOR_PROVIDER_TIMEOUT_SECONDS` | `15.0` | per-provider request budget in the worker |
+| `MONITOR_MAX_CONCURRENCY` | `4` | bounded parallel polls per cycle |
+| `MONITOR_RETRY_COUNT` | `2` | retries on transient provider failure (exponential backoff) |
+| `MONITOR_OBSERVATION_WINDOW_SECONDS` | `3600` | dedupe window — unchanged prices not re-inserted within it |
+
+## Notifications (Phase 5)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `PRICEPILOT_NOTIFICATION_PROVIDER` | *(empty)* | `email` when SMTP is configured; empty → honest no-op (in-app alerts still persist) |
+| `SMTP_HOST` / `SMTP_PORT` | *(empty)* / `587` | requires username+password+sender to enable email |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | *(empty)* | secrets — never commit |
+| `SMTP_SENDER` | *(empty)* | envelope sender for alert emails |
 
 ## Web
 

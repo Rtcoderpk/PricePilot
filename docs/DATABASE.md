@@ -65,7 +65,7 @@ snapshot_alerts      back-in-stock now handled through price_alerts (bonus... se
 - `agent_events(id uuid PK, run_id → agent_runs ON DELETE CASCADE, sequence int, agent text, status text, input_state jsonb, output_state jsonb, validation jsonb, latency_ms int, created_at)`
 
 ### tracking / alerts / shopping
-- `watchlists(id uuid PK, user_id → users, product_id → products, note text, created_at, UNIQUE(user_id, product_id))`
+- `watchlists(id uuid PK, user_id → users, product_id → products, note text, target_price numeric(14,2), target_currency char(3), alert_preferences jsonb default {price_drop,new_low,target_price:true}, paused boolean default false, last_monitor_status text, last_observed_at timestamptz, created_at, updated_at, UNIQUE(user_id, product_id))`
 - `price_alerts(id uuid PK, user_id → users, product_id → products, kind text CHECK in {'target_price','percent_drop','back_in_stock'}, target_amount numeric(14,2), target_currency char(3), percent_threshold numeric, triggering_offer jsonb, status text default 'active' CHECK in {'active','triggered','paused','cancelled'}, created_at, updated_at, updated_at_triggered_at)`
 - `notifications(id uuid PK, user_id → users, alert_id → price_alerts ON DELETE CASCADE, channel text, title text, body text, sent_at, delivered jsonb, created_at)`
 - `shopping_sessions(id uuid PK, user_id → users, run_id → agent_runs, intent_history jsonb, applied_filters jsonb not null default '{}'::jsonb, messages jsonb not null default '[]'::jsonb, prefs_snapshot jsonb, status text default 'active' CHECK in {'active','closed'}, created_at, updated_at)`
@@ -97,7 +97,12 @@ snapshot_alerts      back-in-stock now handled through price_alerts (bonus... se
 ## 6. migrations
 
 - `services/db/alembic/versions/*.py` in numbered order; applied via `alembic upgrade head` (Alembic tracks `alembic_version`).
-- Phase 1 ships: `001_users_profiles`, `002_catalog`, `003_offers_prices`, `004_reviews`, `005_agents`, `006_tracking_alerts`, `007_pgvector`.
+- Phase 1 ships: `001_users_profiles`, `002_catalog`, `003_offers_prices`, `004_reviews`, `006_agents_tracking`, `007_rls`.
+- Phase 5 adds `0009_monitoring` on top of those: tracking metadata on `watchlists`
+  (`target_price`, `alert_preferences`, `paused`, `last_monitor_status`), a
+  `status` lifecycle on `notifications` (`unread`/`read`/`dismissed`), a unique
+  `event_key` on `price_alerts` (alert dedup), and an `(offer_id, recorded_at)`
+  index on `prices` (observation dedup).
 - Roll strategy: no destructive drop in `up`; `down` provided. Supabase `db push` compatible.
 
 ## 7. seeds & fixtures

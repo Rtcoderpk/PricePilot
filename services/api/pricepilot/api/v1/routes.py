@@ -7,14 +7,21 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from pricepilot.db import SessionLocal
 from pricepilot.errors import ErrorCode, PricePilotError
 from pricepilot.logging import get_logger
 from pricepilot.models import (
+    AlertRead,
     ChatQuery,
+    MonitoringStatusResponse,
+    PriceHistoryResponse,
     SearchQuery,
     SearchResponse,
     ShoppingSearchQuery,
     ShoppingSearchResponse,
+    TrackCreate,
+    TrackUpdate,
+    UserPreferencesUpdate,
 )
 from pricepilot.services.image import ImageValidationError, identify_image, validate_image
 
@@ -234,3 +241,184 @@ async def _semantic_available() -> bool:
 
     service = EmbeddingService()
     return await service.available()
+
+
+# --------------------------------------------------------------------------- #
+# Phase 5: price monitoring / tracking / alerts / history
+# --------------------------------------------------------------------------- #
+
+
+def _user_id(request: Request) -> str | None:
+    """Current identity. Auth is deferred (Phase 1 decision); today we accept an
+    explicit `X-User-Id` header. RLS + real JWT plug in here later."""
+    return request.headers.get("x-user-id")
+
+
+@router.get("/monitoring/status", response_model=MonitoringStatusResponse)
+async def monitoring_status(request: Request) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.monitoring_api import monitoring_status as _status
+
+        st = await _status(session)
+    return JSONResponse(content=st)
+
+
+@router.get("/price-history/{product_id}", response_model=PriceHistoryResponse)
+async def price_history_route(request: Request, product_id: str) -> JSONResponse:
+    limiter = _rate_limiter(request)
+    allowed, _ = await limiter.check_or_increment(
+        f"history:{_client_key(request)}", limit=60, window_seconds=60
+    )
+    if not allowed:
+        raise RateLimitExceededError()
+    async with SessionLocal() as session:
+        from pricepilot.services.monitoring_api import price_history
+
+        result = await price_history(session, product_id=product_id)
+    return JSONResponse(content=result)
+
+
+@router.post("/tracking", status_code=201)
+async def tracking_create(request: Request, body: TrackCreate) -> JSONResponse:
+    limiter = _rate_limiter(request)
+    allowed, _ = await limiter.check_or_increment(
+        f"tracking:{_client_key(request)}", limit=20, window_seconds=60
+    )
+    if not allowed:
+        raise RateLimitExceededError()
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import create_tracking
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        result = await create_tracking(
+            session, user_id=uid, product_id=body.product_id,
+            target_price=body.target_price, target_currency=body.target_currency,
+            alert_preferences=body.alert_preferences,
+        )
+    return JSONResponse(status_code=200 if result.get("status") == "already_tracked" else 201, content=result)
+
+
+@router.get("/tracking")
+async def tracking_list(request: Request) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import list_tracking
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        result = await list_tracking(session, user_id=uid)
+    return JSONResponse(content=result)
+
+
+@router.get("/tracking/{watchlist_id}")
+async def tracking_get(request: Request, watchlist_id: str) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import get_tracking
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        result = await get_tracking(session, user_id=uid, watchlist_id=watchlist_id)
+    if result is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not_found", "message": "Tracking record not found.", "details": None}},
+        )
+    return JSONResponse(content=result)
+
+
+@router.patch("/tracking/{watchlist_id}")
+async def tracking_update(request: Request, watchlist_id: str, body: TrackUpdate) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import update_tracking
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        result = await update_tracking(
+            session, user_id=uid, watchlist_id=watchlist_id,
+            target_price=body.target_price, target_currency=body.target_currency,
+            alert_preferences=body.alert_preferences, paused=body.paused,
+        )
+    if result is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not_found", "message": "Tracking record not found.", "details": None}},
+        )
+    return JSONResponse(content=result)
+
+
+@router.delete("/tracking/{watchlist_id}", status_code=204)
+async def tracking_delete(request: Request, watchlist_id: str) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import delete_tracking
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        ok = await delete_tracking(session, user_id=uid, watchlist_id=watchlist_id)
+    if not ok:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not_found", "message": "Tracking record not found.", "details": None}},
+        )
+    return JSONResponse(status_code=204, content=None)
+
+
+@router.get("/alerts")
+async def alerts_list(request: Request, unread: bool = False) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import list_alerts
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        result = await list_alerts(session, user_id=uid, only_unread=unread)
+    return JSONResponse(content=result)
+
+
+@router.patch("/alerts/{notification_id}")
+async def alerts_update(request: Request, notification_id: str, body: AlertRead) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.monitoring_api import read_alert
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        ok = await read_alert(session, user_id=uid, notification_id=notification_id, status=body.status)
+    if not ok:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not_found", "message": "Notification not found.", "details": None}},
+        )
+    return JSONResponse(content={"status": "ok"})
+
+
+@router.get("/preferences")
+async def preferences_get(request: Request) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.preferences import get_preferences
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        result = await get_preferences(session, user_id=uid)
+    if result is None:
+        # honest empty state — no row yet, but valid (user may not have set prefs)
+        return JSONResponse(content={"preferences": None})
+    return JSONResponse(content={"preferences": result})
+
+
+@router.put("/preferences")
+async def preferences_put(request: Request, body: UserPreferencesUpdate) -> JSONResponse:
+    async with SessionLocal() as session:
+        from pricepilot.services.identity import resolve_user_identity
+        from pricepilot.services.preferences import upsert_preferences
+
+        uid = await resolve_user_identity(session, _user_id(request))
+
+        fields = body.model_dump(exclude_unset=True)
+        result = await upsert_preferences(session, user_id=uid, fields=fields)
+    return JSONResponse(content={"preferences": result})

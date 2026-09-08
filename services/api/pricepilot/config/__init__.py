@@ -36,10 +36,21 @@ class Settings(BaseSettings):
     pricepilot_public_base_url: str = Field(default="http://localhost:8000")
     cors_origin: str = Field(default="http://localhost:3000")
 
-    # --- Worker ---
-    alert_sweep_interval_seconds: int = Field(default=300)
-    price_poll_interval_seconds: int = Field(default=3600)
-    max_alerts_per_sweep: int = Field(default=100)
+    # --- Price monitoring (Phase 5) ---
+    monitor_enabled: bool = Field(default=True)
+    monitor_poll_interval_seconds: int = Field(default=3600)
+    monitor_provider_timeout_seconds: float = Field(default=15.0)
+    monitor_max_concurrency: int = Field(default=4)
+    monitor_retry_count: int = Field(default=2)
+    monitor_observation_window_seconds: int = Field(default=3600)
+
+    # --- Notifications ---
+    pricepilot_notification_provider: str = Field(default="")
+    smtp_host: str | None = Field(default=None)
+    smtp_port: int = Field(default=587)
+    smtp_username: str | None = Field(default=None)
+    smtp_password: str | None = Field(default=None)
+    smtp_sender: str | None = Field(default=None)
 
     # --- AI providers ---
     ai_provider: str | None = Field(default=None)  # e.g. "openai-compatible" | "ollama"

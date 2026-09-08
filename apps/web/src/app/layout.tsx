@@ -18,6 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               PricePilot
             </Link>
             <nav className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
+              <Link href="/dashboard" className="hover:text-foreground">
+                Dashboard
+              </Link>
               <Link href="/search" className="hover:text-foreground">
                 Search
               </Link>
@@ -27,8 +30,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/track" className="hover:text-foreground">
                 Track
               </Link>
+              <Link href="/history" className="hover:text-foreground">
+                History
+              </Link>
               <Link href="/alerts" className="hover:text-foreground">
                 Alerts
+              </Link>
+              <Link href="/settings" className="hover:text-foreground">
+                Settings
               </Link>
               <Link href="/shopping" className="hover:text-foreground">
                 AI assistant

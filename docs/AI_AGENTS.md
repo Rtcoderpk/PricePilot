@@ -172,3 +172,22 @@ intent ──▶ search ──▶ matching ──▶ research
   deterministic parser (still typed and valid, lower recall). This is surfaced in
   `warnings`/`provider_errors`.
 - `shopping/chat` multi-turn and image/voice shopping are intentionally Phase 4.
+
+## 10. Phase 5: monitoring data feeding the price agent
+
+The `price` agent's `price_position`/`insufficient_history` is fed by real
+observations the Phase 5 worker collects (see `services/worker/main.py`):
+
+- Worker polls tracked offers over time → `prices` (append-only, deduped within
+  `MONITOR_OBSERVATION_WINDOW_SECONDS`).
+- `price_series(product_id)` today reads the platform's own `prices` history —
+  no external history provider is used or fabricated.
+- Deterministic event detection (`new_low`, `target_price_reached`, `price_drop`,
+  `availability_change`/back-in-stock) turns observations into alert/notification
+  rows. Alerts are deduped by a unique `event_key`; observations are never
+  synthesized — an absent price yields no event/row.
+- The API exposes history/analytics (`GET /price-history/{id}`), tracking
+  (`/tracking`), alerts (`/alerts`), preferences (`/preferences`), and monitoring
+  status (`/monitoring/status`) — all `X-User-Id`-scoped until real JWT auth.
+  The header must be a valid UUID; a centralized identity resolver idempotently
+  creates the `users` row on first use (see `docs/API.md`).

@@ -163,7 +163,7 @@ OpenFoodFacts is the only demo-safe *live* public product source we can rely on 
 
 ## 9. API surface (v1)
 
-`POST /search` · `GET /products` · `GET /products/{id}` · `GET /compare?ids=` · `POST /shopping/chat` · `GET /recommendations` · `GET /price-history/{id}` · `GET/POST /alerts` · `GET/POST /watchlist` · `GET/SET /preferences` · `GET /agents/{run_id}` (run status/stream). Consistent error envelope (§ section in API.md), pagination, Pydantic validation.
+`POST /search` · `GET /products` · `GET /products/{id}` · `GET /compare?ids=` · `POST /shopping/chat` · `GET /recommendations` · `GET /price-history/{id}` · `GET/PATCH /alerts` · `GET/POST/PATCH/DELETE /tracking` · `GET/PUT /preferences` · `GET /monitoring/status` · `GET /agents/{run_id}` (run status/stream). Consistent error envelope (§ section in API.md), pagination, Pydantic validation. Monitoring endpoints use `X-User-Id` until real JWT auth lands (Phase 1 decision).
 
 ## 10. Observability
 

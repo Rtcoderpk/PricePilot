@@ -200,3 +200,81 @@ class ImageSearchQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_matches: int = Field(default=3, ge=1, le=10)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 5: price monitoring / tracking / alerts
+# --------------------------------------------------------------------------- #
+
+
+class TrackCreate(BaseModel):
+    """Create a watchlist entry for a product."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str = Field(min_length=1)
+    target_price: float | None = Field(default=None, ge=0)
+    target_currency: str | None = Field(default=None, max_length=3)
+    alert_preferences: dict[str, bool] | None = Field(default=None)
+
+
+class TrackUpdate(BaseModel):
+    """Update a watchlist entry (target, preferences)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_price: float | None = Field(default=None, ge=0, description="Set to change; omit to leave unchanged. Use 0 to clear.")
+    target_currency: str | None = Field(default=None, max_length=3)
+    alert_preferences: dict[str, bool] | None = Field(default=None)
+    paused: bool | None = Field(default=None)
+
+
+class AlertRead(BaseModel):
+    """Mark one or all notifications as read/dismissed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: str = Field(pattern="^(read|dismissed)$")
+
+
+class PriceHistoryResponse(BaseModel):
+    """A product's real observation history + analytics."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    product_id: str
+    observations: list[dict[str, Any]] = Field(default_factory=list)
+    analytics: dict[str, Any] = Field(default_factory=dict)
+    currency: str | None = None
+
+
+class MonitoringStatusResponse(BaseModel):
+    """Honest monitoring capability state."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool
+    provider: str  # "available" | "unavailable"
+    interval_seconds: int
+    tracked_products: int = 0
+    message: str | None = None
+
+
+class UserPreferencesUpdate(BaseModel):
+    """Partial update for a user's shopping preferences (Settings page).
+
+    The `user_preferences` table stores the full preference set; any subset of
+    fields may be provided. `max_budget` uses 0 to clear — matching the
+    TrackUpdate convention. Extra fields are rejected.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preferred_brands: list[str] | None = Field(default=None, max_length=50)
+    max_budget: float | None = Field(default=None, ge=0, description="Use 0 to clear budget.")
+    min_specs: dict[str, Any] | None = None
+    preferred_stores: list[str] | None = Field(default=None, max_length=50)
+    preferred_condition: list[str] | None = Field(default=None, max_length=10)
+    price_vs_quality: float | None = Field(default=None, ge=0, le=1)
+    currency_code: str | None = Field(default=None, max_length=3)
+    shopping_locale: str | None = Field(default=None, max_length=16)
