@@ -18,6 +18,21 @@ recommendation.
   and ranks explainable recommendations with hard-constraint enforcement.
   Typed Pydantic state; no unstructured dict. No fabrication. Deterministic fallback
   when no LLM key is configured.
+- **Advanced AI surface** (Phase 4):
+  - **Should I Buy?** — explainable BUY / WAIT / AVOID / insufficient-data verdict
+    per product from real signals.
+  - **Multi-turn chat** — `POST /api/v1/shopping/chat` with session persistence and
+    deterministic refinements ("only <brand>", "cheaper", "under N", "ignore
+    refurbished", "more results").
+  - **Voice input** — browser Web Speech API (honest "not supported" fallback).
+  - **Image shopping** — `POST /api/v1/shopping/image` with strict validation and
+    honest "vision not configured" response when no provider.
+  - **Review intelligence** — real `reviews` theme extraction + `review_summaries`
+    upsert; honest `review_data_unavailable` when no reviews exist.
+  - **Semantic search / RAG** — pgvector service + embedding provider interface;
+    keyword fallback when unconfigured (honest `semantic:"keyword"` status).
+  - **Price forecasting** — uncertainty-gated (range + confidence), only with ≥30
+    real history samples; else `insufficient_history`.
 - **Canonical product engine** (Phase 2) — raw offers are normalized, identifiers
   extracted (GTIN/barcode), and deterministically matched into deduplicated
   variant-level products with multiple merchant offers.
@@ -69,6 +84,7 @@ docs/             architecture, database, agents, deployment, API, env
 | 1 | Foundation | done |
 | 2 | Product intelligence (normalization, matching, dedup, multi-provider) | done |
 | 3 | AI agents (intent → recommendation) | done |
+| 4 | Advanced AI (SIBT, chat, voice, image, reviews, semantic, forecast) | done |
 | 3 | AI agents (intent → recommendation) | planned |
 | 4 | SIBT, chat, image/voice, review intelligence | planned |
 | 5 | Price monitoring, alerts, worker jobs | planned |

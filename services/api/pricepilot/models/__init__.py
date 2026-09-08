@@ -171,8 +171,32 @@ class ShoppingSearchResponse(BaseModel):
     review_analysis: dict[str, Any] = Field(default_factory=dict)
     seller_analysis: dict[str, Any] = Field(default_factory=dict)
     deal_scores: dict[str, Any] = Field(default_factory=dict)
+    sibt: dict[str, Any] = Field(default_factory=dict)
+    forecasts: dict[str, Any] = Field(default_factory=dict)
     research_evidence: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     provider_errors: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     answer: str | None = None
+    # Chat additions (Phase 4)
+    session_id: str | None = None
+    conversation: list[dict[str, Any]] = Field(default_factory=list)
+    semantic: str = "keyword"  # "available" | "keyword" (honest status)
+    refinements: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatQuery(BaseModel):
+    """Request body for POST /api/v1/shopping/chat."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+    session_id: str | None = Field(default=None, description="Existing chat session, or None to start a new one.")
+
+
+class ImageSearchQuery(BaseModel):
+    """Request body for POST /api/v1/shopping/image (multipart handled separately)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_matches: int = Field(default=3, ge=1, le=10)

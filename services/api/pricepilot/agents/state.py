@@ -202,6 +202,46 @@ class DealScore(BaseModel):
     missing_data_warnings: list[str] = Field(default_factory=list)
 
 
+class SibtVerdict(str, Enum):
+    BUY = "buy"
+    WAIT = "wait"
+    AVOID = "avoid"
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
+class ShouldIBuy(BaseModel):
+    """Explainable BUY / WAIT / AVOID verdict from real signals."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    product_id: str
+    verdict: SibtVerdict = SibtVerdict.INSUFFICIENT_DATA
+    reasons: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    generated_at: datetime | None = None
+
+
+class ForecastStatus(str, Enum):
+    INSUFFICIENT_HISTORY = "insufficient_history"
+    AVAILABLE = "available"
+
+
+class ForecastAnalysis(BaseModel):
+    """Uncertainty-aware price estimate. NEVER a guarantee."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    product_id: str
+    status: ForecastStatus = ForecastStatus.INSUFFICIENT_HISTORY
+    method: str | None = None
+    forecast_next: float | None = None
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+    confidence: float | None = None  # 0..1
+    samples: int = 0
+    reason: str | None = None
+
+
 class Recommendation(BaseModel):
     """A ranked recommendation with explainable reasons."""
 
@@ -252,6 +292,8 @@ class AgentState(BaseModel):
     review_analysis: dict[str, ReviewAnalysis] = Field(default_factory=dict)
     seller_analysis: dict[str, SellerAnalysis] = Field(default_factory=dict)
     deal_scores: dict[str, DealScore] = Field(default_factory=dict)
+    sibt: dict[str, ShouldIBuy] = Field(default_factory=dict)
+    forecasts: dict[str, ForecastAnalysis] = Field(default_factory=dict)
     recommendations: list[Recommendation] = Field(default_factory=list)
 
     warnings: list[str] = Field(default_factory=list)

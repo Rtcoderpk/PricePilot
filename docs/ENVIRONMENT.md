@@ -49,6 +49,10 @@ the port mappings shown).
 
 | Variable | Default | Notes |
 |---|---|---|
+| `PRICEPILOT_EMBEDDING_PROVIDER` | *(empty)* | `openai-compatible` to enable pgvector semantic search; empty → keyword fallback (honest `semantic:"keyword"`) |
+| `PRICEPILOT_VISION_PROVIDER` | *(empty)* | not yet implemented; empty → image upload returns honest "vision not configured" |
+| `PRICEPILOT_REVIEW_PROVIDER` | *(empty)* | not yet implemented; review agent reads real `reviews` rows + theme extraction |
+| `AI_EMBEDDING_MODEL` | *(empty)* | e.g. `text-embedding-3-small` (1536-dim matches the table) |
 | `ALERT_SWEEP_INTERVAL_SECONDS` | `300` | alert sweep cadence (Phase 5) |
 | `PRICE_POLL_INTERVAL_SECONDS` | `3600` | price polling cadence (Phase 5) |
 | `MAX_ALERTS_PER_SWEEP` | `100` | cap per sweep |

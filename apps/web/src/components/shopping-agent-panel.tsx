@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { formatPrice } from "@/components/price";
-import { Loader2, Sparkles } from "lucide-react";
-import { shoppingSearch } from "@/lib/api";
+import { Loader2, MessageSquare, Search, Sparkles } from "lucide-react";
+import { shoppingSearch, shoppingChat } from "@/lib/api";
+import { VoiceInput } from "@/components/voice-input";
+import { ImageUpload } from "@/components/image-upload";
+import { SibtBadge } from "@/components/sibt-badge";
 import type { ShoppingAgentResponse } from "@/lib/types";
 
 type ViewState =
@@ -19,6 +22,9 @@ type ViewState =
 export function ShoppingAgentPanel() {
   const [view, setView] = useState<ViewState>({ kind: "idle" });
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<"search" | "chat">("search");
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  const [conversation, setConversation] = useState<Array<{ role: string; text: string }>>([]);
 
   async function run(e: React.FormEvent) {
     e.preventDefault();
@@ -26,7 +32,12 @@ export function ShoppingAgentPanel() {
     if (!q) return;
     setView({ kind: "loading" });
     try {
-      const data = await shoppingSearch(q);
+      const data =
+        mode === "chat" ? await shoppingChat(q, sessionId) : await shoppingSearch(q);
+      if (mode === "chat") {
+        setSessionId(data.session_id ?? undefined);
+        if (data.conversation?.length) setConversation(data.conversation);
+      }
       setView({ kind: "result", data });
     } catch (err) {
       setView({
@@ -36,21 +47,64 @@ export function ShoppingAgentPanel() {
     }
   }
 
+  function handleTranscript(text: string) {
+    setQuery(text);
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant={mode === "search" ? "default" : "outline"}
+          onClick={() => setMode("search")}
+        >
+          <Search className="mr-1 h-3 w-3" /> Search
+        </Button>
+        <Button
+          size="sm"
+          variant={mode === "chat" ? "default" : "outline"}
+          onClick={() => setMode("chat")}
+        >
+          <MessageSquare className="mr-1 h-3 w-3" /> Chat
+        </Button>
+      </div>
+
       <form onSubmit={run} className="flex max-w-2xl gap-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder='e.g. "good 55 inch Samsung TV under 700"'
+          placeholder={
+            mode === "chat"
+              ? 'Try: "under 2 euros", "only sidi", "cheaper", "more results"'
+              : 'e.g. "good 55 inch Samsung TV under 700"'
+          }
           className="h-12 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Ask the shopping agent"
         />
+        <VoiceInput onTranscript={handleTranscript} />
         <Button type="submit" size="lg" disabled={view.kind === "loading"}>
           {view.kind === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          Ask PricePilot
+          {mode === "chat" ? "Send" : "Ask PricePilot"}
         </Button>
       </form>
+
+      <ImageUpload onResult={(data) => setView({ kind: "result", data })} />
+
+      {mode === "chat" && conversation.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Conversation</CardTitle>
+          </CardHeader>
+          <CardContent className="max-h-48 space-y-2 overflow-y-auto">
+            {conversation.map((m, i) => (
+              <div key={i} className={`text-sm ${m.role === "user" ? "text-right font-medium" : "text-muted-foreground"}`}>
+                {m.text}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {view.kind === "loading" ? (
         <Card>
@@ -102,6 +156,23 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
         </Card>
       ) : null}
 
+      {data.refinements?.length ? (
+        <Card>
+          <CardContent className="space-y-0.5 p-6 text-xs text-muted-foreground">
+            {data.refinements.map((r, i) => (
+              <p key={i}>understood: {r.note}</p>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {data.semantic ? (
+        <p className="text-xs text-muted-foreground">
+          semantic search: <strong>{data.semantic}</strong>{" "}
+          {data.semantic === "keyword" ? "— embeddings not configured (falling back to keyword matching)" : ""}
+        </p>
+      ) : null}
+
       {data.warnings?.length ? (
         <Card>
           <CardContent className="space-y-1 p-6 text-xs text-muted-foreground">
@@ -127,6 +198,8 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
             const price = data.price_analysis?.[p.canonical_product_id];
             const seller = data.seller_analysis?.[p.canonical_product_id];
             const review = data.review_analysis?.[p.canonical_product_id];
+            const sibt = data.sibt?.[p.canonical_product_id];
+            const forecast = data.forecasts?.[p.canonical_product_id];
             const best = price?.lowest_offer ?? p.price_insight?.current ?? null;
             return (
               <Card key={p.canonical_product_id}>
@@ -134,6 +207,7 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <SibtBadge sibt={sibt} />
                         <h3 className="font-semibold">{p.name}</h3>
                         {rec && !rec.matches_hard_constraints ? (
                           <Badge variant="warning">outside budget</Badge>
@@ -162,6 +236,14 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
                       )}
                     </div>
                   </div>
+
+                  {sibt ? (
+                    <ul className="mt-3 space-y-1 rounded-md border bg-muted/20 p-2 text-xs text-muted-foreground">
+                      {sibt.reasons.map((r, i) => (
+                        <li key={i}>• {r}</li>
+                      ))}
+                    </ul>
+                  ) : null}
 
                   {rec?.reasons?.length ? (
                     <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
@@ -200,6 +282,19 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
                           : "unavailable"}
                       </strong>
                     </span>
+                    {forecast && forecast.status === "available" ? (
+                      <span>
+                        forecast:{" "}
+                        <strong>
+                          {forecast.forecast_next != null ? formatPrice(forecast.forecast_next) : "—"} ({formatPrice(forecast.lower_bound ?? 0)}–{formatPrice(forecast.upper_bound ?? 0)})
+                        </strong>
+                      </span>
+                    ) : null}
+                    {forecast && forecast.status === "insufficient_history" ? (
+                      <span>
+                        forecast: <strong>insufficient history</strong>
+                      </span>
+                    ) : null}
                     {deal?.components ? (
                       <span>components: {Object.values(deal.components).slice(0, 3).map((v) => Number(v).toFixed(0)).join(" / ")}</span>
                     ) : null}

@@ -57,6 +57,34 @@ export async function shoppingSearch(query: string): Promise<ShoppingAgentRespon
   return parseResponse<ShoppingAgentResponse>(res);
 }
 
+export async function shoppingChat(
+  query: string,
+  sessionId?: string,
+): Promise<ShoppingAgentResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/shopping/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, session_id: sessionId }),
+    cache: "no-store",
+  });
+  return parseResponse<ShoppingAgentResponse>(res);
+}
+
+export async function shoppingImage(
+  file: File,
+  maxMatches = 3,
+): Promise<ShoppingAgentResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("max_matches", String(maxMatches));
+  const res = await fetch(`${API_BASE}/api/v1/shopping/image`, {
+    method: "POST",
+    body: form,
+    cache: "no-store",
+  });
+  return parseResponse<ShoppingAgentResponse>(res);
+}
+
 export async function getHealth(): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
   return parseResponse<{ status: string }>(res);

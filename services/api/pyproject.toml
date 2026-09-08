@@ -15,6 +15,7 @@ dependencies = [
     "redis==5.2.1",
     "httpx==0.28.1",
     "python-dotenv==1.0.1",
+    "python-multipart==0.0.20",
     "alembic==1.14.0",
     "tenacity==9.0.0",
 ]
@@ -38,6 +39,9 @@ packages = [
     "pricepilot.providers",
     "pricepilot.providers.ai",
     "pricepilot.providers.search",
+    "pricepilot.providers.embeddings",
+    "pricepilot.providers.vision",
+    "pricepilot.providers.reviews",
     "pricepilot.matching",
     "pricepilot.normalization",
     "pricepilot.agents",

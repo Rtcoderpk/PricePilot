@@ -26,8 +26,14 @@ from pricepilot.agents import (
     search_agent,
     seller_agent,
 )
+from pricepilot.agents import (
+    forecast as forecast_agent,
+)
 from pricepilot.agents import intent as intent_agent
 from pricepilot.agents import persistence as persist
+from pricepilot.agents import (
+    sibt as sibt_agent,
+)
 from pricepilot.agents.state import AgentState, RunStatus
 from pricepilot.logging import get_logger
 
@@ -136,9 +142,12 @@ async def run_shopping_agent(
             )
         return out
 
+    async def _review_node(s: AgentState) -> AgentState:
+        return await review_agent.node(s, session=session)
+
     price_out, review_out, seller_out = await asyncio.gather(
         _run_parallel("price", price_agent.node),
-        _run_parallel("reviews", review_agent.node),
+        _run_parallel("reviews", _review_node),
         _run_parallel("seller", seller_agent.node),
     )
     state = base.model_copy(
@@ -152,6 +161,13 @@ async def run_shopping_agent(
 
     # ── deal score + recommendation ────────────────────────────────────────
     await run_node("deal_score", deal_score_agent.node)
+    await run_node("sibt", sibt_agent.node)
+
+    if session is not None:
+        async def _forecast_with_session(s: AgentState) -> AgentState:
+            return await forecast_agent.node(s, session=session)
+
+        await run_node("forecast", _forecast_with_session)
     await run_node("recommendation", recommendation_agent.node)
 
     # ── finalize ───────────────────────────────────────────────────────────

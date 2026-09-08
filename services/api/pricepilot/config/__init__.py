@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     ai_base_url: str | None = Field(default=None)
     ai_temperature: float = Field(default=0.2)
     ai_max_tokens: int = Field(default=2048)
+    ai_embedding_model: str | None = Field(default=None)  # e.g. text-embedding-3-small
+
+    # --- Embedding / vision / review providers (comma-sep names) ---
+    pricepilot_embedding_provider: str = Field(default="")
+    pricepilot_vision_provider: str = Field(default="")
+    pricepilot_review_provider: str = Field(default="")
 
     # --- Search providers ---
     pricepilot_search_provider: str = Field(default="openfoodfacts")

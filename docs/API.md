@@ -10,6 +10,8 @@ Base: `http://localhost:8000` (dev) · OpenAPI schema at `/docs`.
 | GET | `/readyz` | Readiness (DB required, Redis degradable) |
 | POST | `/api/v1/search` | Run a shopping search |
 | POST | `/api/v1/shopping/search` | Run the full AI shopping agent |
+| POST | `/api/v1/shopping/chat` | Multi-turn shopping chat (session-persisted) |
+| POST | `/api/v1/shopping/image` | Upload a product image → possible matches |
 
 ## `POST /api/v1/search`
 
@@ -119,11 +121,39 @@ Response `200`:
   "price_analysis": { "pp_…": { "lowest_offer": 699, "price_position": "insufficient_history" } },
   "seller_analysis": { "pp_…": { "label": "verified_signal", "signals": ["available"] } },
   "deal_scores": { "pp_…": { "score": 81, "label": "Good Deal", "components": { "price_value": 60, … } } },
+  "sibt": { "pp_…": { "verdict": "wait", "reasons": ["price 699 present but", "deal score 60/100 is weak"],
+                     "confidence": 0.5, "generated_at": "…" } },
+  "forecasts": { "pp_…": { "status": "insufficient_history", "samples": 0, "reason": "need at least 30 real price samples" } },
+  "semantic": "keyword",
   "warnings": [ "No review provider configured" ],
   "confidence": 0.56,
   "answer": "Best match: Samsung 55\" QLED (best 699.00) (Deal Score 81/100)"
 }
 ```
+
+## `POST /api/v1/shopping/chat`
+
+Multi-turn conversation. Request:
+```json
+{ "query": "only samsung", "session_id": "…" }
+```
+- `session_id` omitted on the first message → a new `shopping_sessions` row is
+  created and returned.
+- Deterministic refinements recognized: `only <brand>` (brand allow list),
+  `no/not <brand>` (exclude), `cheaper`, `under <N>` (budget), `ignore
+  refurbished`, `best rated`, `more` / `show more`. Anything else runs a fresh
+  shopping search.
+- Response includes `session_id`, `conversation` (message list), and
+  `refinements` (what was understood) plus the normal agent envelope.
+
+## `POST /api/v1/shopping/image`
+
+Multipart upload (`file` + optional `max_matches`). Validates `image/jpeg|png|webp`
+and ≤ 5 MB. Without a configured vision provider it returns HTTP 200 with:
+```json
+{ "status": "unavailable", "warnings": ["Vision provider is not configured …"], "products": [] }
+```
+With a provider it returns `possible matches` with confidence levels.
 
 ## Architecture note
 

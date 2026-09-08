@@ -137,8 +137,31 @@ export interface ShoppingAgentResponse {
   review_analysis?: Record<string, NonProductDetail>;
   seller_analysis?: Record<string, NonProductDetail>;
   deal_scores?: Record<string, NonProductDetail>;
+  sibt?: Record<string, SibtDetail>;
+  forecasts?: Record<string, ForecastDetail>;
   warnings?: string[];
   provider_errors?: string[];
   confidence?: number;
   answer?: string | null;
+  session_id?: string | null;
+  conversation?: Array<{ role: string; text: string; ts?: string }>;
+  refinements?: Array<{ note?: string }>;
+  semantic?: string;
+}
+
+export interface SibtDetail {
+  verdict: "buy" | "wait" | "avoid" | "insufficient_data";
+  reasons: string[];
+  confidence: number;
+  generated_at?: string | null;
+}
+
+export interface ForecastDetail {
+  status: "available" | "insufficient_history";
+  forecast_next?: number | null;
+  lower_bound?: number | null;
+  upper_bound?: number | null;
+  confidence?: number | null;
+  samples?: number;
+  reason?: string | null;
 }
