@@ -18,7 +18,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from pricepilot.config import settings
 from pricepilot.errors import ProviderError
 from pricepilot.logging import get_logger
-from pricepilot.models import RawOffer
+from pricepilot.models import ProductIdentifierRef, RawOffer
 from pricepilot.providers.base import JsonClient
 from pricepilot.providers.search import SearchProvider
 
@@ -74,6 +74,10 @@ class OpenFoodFactsProvider(SearchProvider):
         for raw in products:
             title = raw.get("product_name") or raw.get("generic_name") or "Unnamed product"
             price = raw.get("product_price")
+            code = raw.get("code")
+            identifiers = []
+            if code:
+                identifiers.append(ProductIdentifierRef(type="gtin", value=str(code)))
             offers.append(
                 RawOffer(
                     provider=self.name,
@@ -82,10 +86,13 @@ class OpenFoodFactsProvider(SearchProvider):
                     price_amount=_to_float(price),
                     price_currency="EUR" if price is not None else "USD",
                     availability="in_stock" if raw.get("product_available") else None,
+                    brand=raw.get("brands"),
+                    quantity=raw.get("quantity"),
                     data_source=self.name,
                     is_fixture=False,
+                    identifiers=identifiers,
                     raw={
-                        "code": raw.get("code"),
+                        "code": code,
                         "brands": raw.get("brands"),
                         "categories": raw.get("categories"),
                         "image_small_url": raw.get("image_small_url"),

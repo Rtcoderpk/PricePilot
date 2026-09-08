@@ -38,6 +38,8 @@ packages = [
     "pricepilot.providers",
     "pricepilot.providers.ai",
     "pricepilot.providers.search",
+    "pricepilot.matching",
+    "pricepilot.normalization",
     "pricepilot.services",
     "pricepilot.api",
     "pricepilot.api.v1",

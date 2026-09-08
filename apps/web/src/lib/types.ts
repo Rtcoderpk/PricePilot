@@ -2,6 +2,11 @@
 
 export type ProviderAvailability = "available" | "unavailable";
 
+export interface ProductIdentifierRef {
+  type: string;
+  value: string;
+}
+
 export interface RawOffer {
   provider: string;
   title: string;
@@ -11,6 +16,12 @@ export interface RawOffer {
   availability?: string | null;
   data_source: string;
   is_fixture: boolean;
+  brand?: string | null;
+  model?: string | null;
+  quantity?: string | null;
+  storage?: string | null;
+  color?: string | null;
+  identifiers: ProductIdentifierRef[];
   raw: Record<string, unknown>;
 }
 
@@ -29,6 +40,9 @@ export interface ProductResult {
   category?: string | null;
   description?: string | null;
   image_url?: string | null;
+  variant?: Record<string, unknown>;
+  match_confidence?: number;
+  match_method?: string;
   offers: RawOffer[];
   price_insight: PriceInsight | null;
   is_fixture: boolean;

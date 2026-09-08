@@ -21,10 +21,21 @@ class ProviderAvailability(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class ProductIdentifierRef(BaseModel):
+    """A structured identifier (GTIN/EAN/UPC, MPN, model, sku...)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: str
+    value: str
+
+
 class RawOffer(BaseModel):
     """An offer as fetched from a provider, before normalization/matching.
 
     `data_source` names the provider; `is_fixture` flags dev-only demo data.
+    `identifiers` and `attributes` are the normalized, structured view used by
+    the canonical matcher.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -37,6 +48,12 @@ class RawOffer(BaseModel):
     availability: str | None = None
     data_source: str = "provider"
     is_fixture: bool = False
+    brand: str | None = None
+    model: str | None = None
+    quantity: str | None = None
+    storage: str | None = None
+    color: str | None = None
+    identifiers: list[ProductIdentifierRef] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -53,10 +70,11 @@ class PriceInsight(BaseModel):
 
 
 class ProductResult(BaseModel):
-    """A normalized product with its offers and derived insight.
+    """A canonical product with its merchant offers and derived insight.
 
-    In Phase 1, products are still provider-shape (matching/dedup lands in
-    Phase 2); `canonical_product_id` is the identifier we will coalesce onto.
+    One product = one variant + many merchant offers (deduplicated). `variant`
+    holds the distinguishing attributes (storage, quantity, color, ...).
+    `match_confidence`/`match_method` explain how offers were grouped.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -67,6 +85,9 @@ class ProductResult(BaseModel):
     category: str | None = None
     description: str | None = None
     image_url: str | None = None
+    variant: dict[str, Any] = Field(default_factory=dict)
+    match_confidence: float = 1.0
+    match_method: str = "provider"
     offers: list[RawOffer] = Field(default_factory=list)
     price_insight: PriceInsight | None = None
     is_fixture: bool = False

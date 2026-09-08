@@ -172,5 +172,8 @@ def downgrade() -> None:
     op.drop_table("price_alerts")
     op.drop_table("watchlists")
     op.drop_table("agent_events")
-    op.drop_table("search_sessions")
+    # break the search_sessions <-> agent_runs cycle BEFORE dropping either table
+    op.drop_constraint("fk_search_sessions_run_id", "search_sessions", type_="foreignkey")
+    # drop agent_runs first (it references search_sessions), then search_sessions
     op.drop_table("agent_runs")
+    op.drop_table("search_sessions")

@@ -52,11 +52,11 @@ jobs:
       - name: Lint
         run: ruff check pricepilot tests
 
-      - name: Migrations (apply to service Postgres)
+      - name: Migrations (apply to clean service Postgres)
         env:
           DATABASE_URL: postgresql+psycopg://pricepilot:pricepilot@localhost:5432/pricepilot
         run: |
-          cd ../../services/db && alembic upgrade head
+          cd ../../services/db && alembic upgrade head && alembic downgrade base && alembic upgrade head
 
       - name: Unit + integration tests
         env:

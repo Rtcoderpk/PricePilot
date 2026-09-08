@@ -15,7 +15,7 @@
 users                Profiles of users
 profiles             user metadata (public display info)
 user_preferences     reusable shopping prefs (brands, budget, stores, condition, weights)
-products             canonical deduped product (one per matched identity)
+products             canonical deduped product — variant-level, one per matched identity+variant (variant_key + normalized_attrs since 0008)
 product_identifiers  GTIN/UPC/EAN, model, MPN → product
 product_offers       offer per merchant (price, shipping, tax, url)
 prices               append-only point-in-time series (worker/ingest writes)
@@ -44,7 +44,7 @@ snapshot_alerts      back-in-stock now handled through price_alerts (bonus... se
 - `user_preferences(id uuid PK, user_id → users ON DELETE CASCADE, preferred_brands text[], max_budget numeric(14,2), min_specs jsonb, preferred_stores text[], preferred_condition text[] CHECK (condition in ('new','refurbished','any')), price_vs_quality numeric(3,2) CHECK (0<=price_vs_quality<=1), currency_code char(3) default 'USD', shopping_locale text, created_at, updated_at, UNIQUE(user_id))`
 
 ### catalog
-- `products(id uuid PK, canonical_name text not null, description text, brand text, category text, condition text, meta jsonb, is_fixture boolean not null default false, created_at, updated_at)`
+- `products(id uuid PK, canonical_name text not null, description text, brand text, category text, condition text, meta jsonb, variant_key text, normalized_attrs jsonb [added 0008], is_fixture boolean not null default false, created_at, updated_at)`
 - `product_identifiers(id uuid PK, product_id → products ON DELETE CASCADE, id_type text CHECK in {'sku','gtin','upc','ean','mpn','model_number'}, id_value text not null, source text, UNIQUE(id_type, id_value))`
 
 ### offers & price series

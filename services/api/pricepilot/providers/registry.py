@@ -17,29 +17,69 @@ from pricepilot.providers.search.openfoodfacts import OpenFoodFactsProvider
 
 log = get_logger("providers.registry")
 
+# Canonical search-provider names → builders.
+_PROVIDER_BUILDERS = {
+    "openfoodfacts": OpenFoodFactsProvider,
+}
+
+
+def _configured_names() -> list[str]:
+    raw = (settings.pricepilot_search_provider or "").strip().lower()
+    if not raw:
+        return []
+    return [name.strip() for name in raw.split(",") if name.strip()]
+
+
+def build_providers() -> list[SearchProvider]:
+    """Build all configured search providers.
+
+    Supports a comma-separated `PRICEPILOT_SEARCH_PROVIDER` (e.g.
+    "openfoodfacts"). Unknown/empty names are logged and dropped; an empty
+    config yields the honest no-op.
+    """
+    names = _configured_names()
+    providers: list[SearchProvider] = []
+    for name in names:
+        builder = _PROVIDER_BUILDERS.get(name)
+        if builder is None:
+            log.warning("unknown search provider %r; ignoring", name)
+            continue
+        providers.append(builder())
+    if not providers:
+        log.warning("no search provider configured; using honest no-op")
+        providers.append(NoopSearchProvider())
+    return providers
+
 
 def build_search_provider() -> SearchProvider:
-    selected = (settings.pricepilot_search_provider or "").strip().lower()
-    if selected == "openfoodfacts":
-        log.info("search provider: openfoodfacts")
-        return OpenFoodFactsProvider()
-    if selected == "":
-        log.warning("no search provider configured; using honest no-op")
-        return NoopSearchProvider()
-    log.warning("unknown search provider %r; using honest no-op", selected)
-    return NoopSearchProvider()
+    """Backward-compatible single-provider accessor.
+
+    Returns the first configured provider, or the honest no-op.
+    """
+    return build_providers()[0]
+
+
+def search_provider_statuses() -> list[ProviderStatus]:
+    """A status per configured provider (and an honest unavailable when none)."""
+    providers = build_providers()
+    statuses: list[ProviderStatus] = []
+    for provider in providers:
+        if isinstance(provider, NoopSearchProvider):
+            statuses.append(
+                ProviderStatus(
+                    name="search",
+                    availability="unavailable",
+                    reason="PRICEPILOT_SEARCH_PROVIDER not configured to a live provider",
+                )
+            )
+        else:
+            statuses.append(ProviderStatus(name=provider.name, availability="available", reason=None))
+    return statuses
 
 
 def search_provider_status() -> ProviderStatus:
-    provider = build_search_provider()
-    # availability is determined per-status so callers don't await a network call
-    if isinstance(provider, OpenFoodFactsProvider):
-        return ProviderStatus(name="search", availability="available", reason=None)
-    return ProviderStatus(
-        name="search",
-        availability="unavailable",
-        reason="PRICEPILOT_SEARCH_PROVIDER not configured to a live provider",
-    )
+    """Backward-compatible single status (first result or honest unavailable)."""
+    return search_provider_statuses()[0]
 
 
 @lru_cache

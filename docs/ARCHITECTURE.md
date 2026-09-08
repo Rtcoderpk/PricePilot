@@ -103,17 +103,35 @@ The agent engine is the highest-risk technical dependency in the plan. **Before 
 ## 6. Provider abstraction
 
 ```
-AIProvider          generate_structured(prompt, schema) → validated model
-SearchProvider      search(intent, query) → raw offers
-ProductProvider     product_by_url / product_by_identifier
-ReviewProvider      fetch_reviews(product_id) → raw reviews
-PriceProvider       price_series(product_id) → raw history
-EmbeddingProvider   embed(texts) → vectors
+SearchProvider        search(query) → RawOffer[]            (canonicalized downstream)
+ProductProvider       product_by_url / product_by_identifier
+AIProvider            generate_structured(prompt, schema) → validated model
+ReviewProvider        fetch_reviews(product_id) → raw reviews
+PriceProvider         price_series(product_id) → raw history
+EmbeddingProvider     embed(texts) → vectors
 ```
 
-- Registry pattern: `ProviderRegistry` + env key per slot (`PRICEPILOT_SEARCH_PROVIDER` etc.).
-- Each adapter declares **availability** + **capability flags**; UI renders unconfigured slots as "provider unavailable — configure X".
-- Every adapter enforces its own timeout, rate limit, retry/backoff, and response validation.
+- Registry pattern: `ProviderRegistry` + comma-separated `PRICEPILOT_SEARCH_PROVIDER`
+  (`openfoodfacts,<next>`), allowing parallel fan-out across providers.
+- Each adapter declares **availability** + **capability flags**; the UI renders
+  unconfigured slots as "provider unavailable — configure X".
+- Every adapter enforces its own timeout, rate limit, retry/backoff, and response
+  validation.
+
+### Canonical product pipeline (Phase 2)
+
+Raw offers → **identifier extraction** (GTIN/EAN/UPC barcode from OFF `code`,
+MPN when present) → **attribute normalization** (title, brand, model, storage,
+quantity/pack-size, color) → **deterministic + confidence matching** → grouped
+**canonical variant products** with merchant offers.
+
+- Matching priority: exact GTIN → very high confidence; conflicting GTIN/brand/
+  variant → strong reject; brand+model, normalized title, pack size → supporting
+  signals; semantic similarity → supporting only, never sole basis for a merge.
+- A canonical product is variant-level: "Sidi Ali 33 cl" and "Sidi Ali 2 L" are
+  distinct products, never merged by similar titles.
+- Determinism first: numeric identifiers and exact normalized signals decide;
+  embeddings only generate candidates for the residual set.
 
 ### Implemented/planned adapters (Phase 2–4)
 

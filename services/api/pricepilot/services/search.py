@@ -1,8 +1,9 @@
 """Search orchestration service.
 
-Coordinates configured search providers in parallel, normalizes results, and
-produces the response envelope. Provider availability is always reported
-honestly — unconfigured slots do not fabricate data.
+Coordinates configured search providers in parallel, canonicalizes raw offers
+into deduplicated products (see services/canonical), and produces the response
+envelope. Provider availability is always reported honestly — unconfigured
+slots do not fabricate data.
 """
 
 from __future__ import annotations
@@ -11,16 +12,21 @@ import asyncio
 from datetime import datetime
 
 from pricepilot.logging import get_logger
-from pricepilot.models import ProviderStatus, RawOffer, SearchResponse
-from pricepilot.providers.registry import build_search_provider, search_provider_status
-from pricepilot.providers.search.openfoodfacts import OpenFoodFactsProvider
+from pricepilot.models import PriceInsight, ProductResult, RawOffer, SearchResponse
+from pricepilot.providers.registry import build_providers, search_provider_statuses
+from pricepilot.providers.search import NoopSearchProvider
+from pricepilot.services.canonical import canonicalize
 
 log = get_logger("services.search")
+
+# Per-provider request budget; one slow provider must not block the rest.
+PROVIDER_TIMEOUT_SECONDS = 20
 
 
 class SearchService:
     def __init__(self, *, cache=None) -> None:
-        self.provider = build_search_provider()
+        self.providers = build_providers()
+        self._single_provider = self.providers[0] if self.providers else None
         self.cache = cache  # optional redis cache client
 
     async def run_search(
@@ -51,56 +57,65 @@ class SearchService:
         return result
 
     async def _run_search_once(self, query: str, *, max_results: int) -> SearchResponse:
-        provider = self.provider
-        status = search_provider_status()
+        statuses = search_provider_statuses()
+        live = [p for p in self.providers if not isinstance(p, NoopSearchProvider)]
 
-        if not isinstance(provider, OpenFoodFactsProvider):
-            # Not yet a real configured source; keep the interface intact, report
-            # honestly, and return an empty envelope rather than fake results.
-            log.info("search provider not enabled; returning empty result for %r", query)
+        if not live:
+            log.info("no search provider enabled; returning empty result for %r", query)
             return SearchResponse(
                 query=query,
                 products=[],
-                providers=[status],
+                providers=statuses,
                 total=0,
                 generated_at=datetime.utcnow(),
                 notice="Search provider is not configured — configure a search provider to get results.",
             )
 
-        offers: list[RawOffer] = []
-        try:
-            offers = await asyncio.wait_for(
-                provider.search(query, max_results=max_results),
-                timeout=20,
-            )
-        except TimeoutError:
-            log.warning("search timed out for query %r", query)
-            offers = []
-        except Exception:
-            log.exception("search provider error for query %r", query)
-            offers = []
-
-        status = ProviderStatus(
-            name="search",
-            availability="available",
-            reason=None,
-        )
-
-        products = _group_offers_into_products(offers)
+        offers = await self._call_providers(live, query, max_results=max_results)
         notice = None
         if is_fixture_mode(offers):
             notice = "Demo mode: showing fixture data, not live prices."
         if not offers:
             notice = "No offers returned — the provider may rate-limit or have no results."
 
+        products = canonicalize(offers)
+        products = _to_results(products)
+
         return SearchResponse(
             query=query,
             products=products,
-            providers=[status],
+            providers=statuses,
             total=len(products),
             generated_at=datetime.utcnow(),
             notice=notice,
         )
+
+    async def _call_providers(
+        self,
+        providers: list,
+        query: str,
+        *,
+        max_results: int,
+    ) -> list[RawOffer]:
+        """Call all live providers in parallel, collecting offers with graceful
+        per-provider timeout/error handling."""
+        per_provider = max(1, max_results // len(providers))
+
+        async def _one(provider) -> list[RawOffer]:
+            try:
+                return await asyncio.wait_for(
+                    provider.search(query, max_results=per_provider),
+                    timeout=PROVIDER_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                log.warning("search timed out for provider %s query %r", provider.name, query)
+                return []
+            except Exception:
+                log.exception("search provider error for %s query %r", provider.name, query)
+                return []
+
+        results = await asyncio.gather(*(_one(p) for p in providers))
+        return [offer for batch in results for offer in batch]
 
     async def _get_cached(self, key: str) -> SearchResponse | None:
         try:
@@ -119,7 +134,48 @@ class SearchService:
             log.warning("search cache write failed for %s", key)
 
     async def close(self) -> None:
-        await self.provider.close()
+        import contextlib
+
+        for provider in self.providers:
+            with contextlib.suppress(Exception):
+                await provider.close()
+
+    @property
+    def provider(self):
+        """Backward-compatible single-provider view (tests use this)."""
+        return self._single_provider
+
+    @provider.setter
+    def provider(self, value) -> None:
+        self._single_provider = value
+        self.providers = [value]
+
+
+def _to_results(products) -> list[ProductResult]:
+    results: list[ProductResult] = []
+    for p in products:
+        priced = [o.price_amount for o in p.offers if o.price_amount is not None]
+        insight = PriceInsight(
+            current=min(priced) if priced else None,
+            currency=p.offers[0].price_currency if p.offers else "USD",
+            sample_count=len(priced),
+        )
+        results.append(
+            ProductResult(
+                canonical_product_id=p.product_id,
+                name=p.name,
+                brand=p.brand,
+                category=p.category,
+                image_url=p.image_url,
+                variant=p.variant,
+                match_confidence=p.match_confidence,
+                match_method=p.match_method,
+                offers=p.offers,
+                price_insight=insight,
+                is_fixture=bool(p.offers) and all(o.is_fixture for o in p.offers),
+            )
+        )
+    return results
 
 
 def cache_ok(result: SearchResponse) -> bool:
@@ -131,53 +187,5 @@ def cache_ok(result: SearchResponse) -> bool:
     )
 
 
-def _group_offers_into_products(offers: list[RawOffer]) -> list:
-    """Group raw offers into per-product results.
-
-    Phase 1 keeps offers as provider-shaped items; TRUE dedup/matching across
-    canonical identities lands in Phase 2 (`product_matching`). Here we simply
-    bucket offers that share the same OFF barcode code so the UI can render
-    one card per real product.
-    """
-    from pricepilot.models import PriceInsight, ProductResult
-
-    grouped: dict[str, list[RawOffer]] = {}
-    for offer in offers:
-        code = offer.raw.get("code")
-        key = str(code) if code else offer.title
-        grouped.setdefault(key, []).append(offer)
-
-    products: list[ProductResult] = []
-    for _key, bucket in grouped.items():
-        first = bucket[0]
-        priced = [o.price_amount for o in bucket if o.price_amount is not None]
-        insight = PriceInsight(
-            current=min(priced) if priced else None,
-            currency=bucket[0].price_currency,
-            sample_count=len(priced),
-        )
-        products.append(
-            ProductResult(
-                canonical_product_id=str(first.raw.get("code") or _slugify(first.title)),
-                name=first.title,
-                brand=first.raw.get("brands"),
-                category=first.raw.get("categories"),
-                image_url=first.raw.get("image_small_url"),
-                description=None,
-                offers=bucket,
-                price_insight=insight,
-                is_fixture=False,
-            )
-        )
-    return products
-
-
 def is_fixture_mode(offers: list[RawOffer]) -> bool:
     return bool(offers) and all(o.is_fixture for o in offers)
-
-
-def _slugify(value: str) -> str:
-    import re
-
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "product"

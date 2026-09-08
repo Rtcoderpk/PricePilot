@@ -46,8 +46,8 @@ These constraints override all feature ambition:
 | Feature | Description | Phase |
 |---|---|---|
 | NL intent parsing | Budget, category, specs, currency/locale, hard vs soft constraints → structured intent | P3 |
-| Product search | Parallel queries across configured providers, normalization, dedup | P2 |
-| Product matching | Same product across stores (SKU/GTIN/UPC/EAN, model #, normalized attrs, embeddings) | P2 |
+| Product search | Parallel queries across configured providers, normalization, dedup | P2 ✅ |
+| Product matching | Same product across stores (SKU/GTIN/UPC/EAN, model #, normalized attrs, embeddings) | P2 ✅ |
 | Price intelligence | Current/lowest/average, trend, discount vs baseline; forecast only with explicit uncertainty | P3–P5 |
 | Total-cost engine | Price + shipping + est. tax + fees − verified discount; estimated vs confirmed clearly separated | P3 |
 | Review intelligence | Theme extraction (positive/negative, battery, fan, durability, delivery…), review summary; text mined only on permitted sources; no fabrication | P4 |
@@ -61,7 +61,7 @@ These constraints override all feature ambition:
 | Voice shopping | Web Speech API transcription (disablable), reuse NL pipeline | P4 |
 | AI shopping chat | Multi-turn context, follow-ups, persistent session filters | P4 |
 | Comparison | Side-by-side specs/price/cost/reviews/seller + "Best Overall / Value / Cheapest / Premium" | P4 |
-| Dedup UI | One product, many offers/merchants | P2 |
+| Dedup UI | One product, many offers/merchants (canonical cards w/ store comparison) | P2 ✅ |
 | Search | NL, keyword, category, filters, sort, semantic (pgvector) | P2/P4 |
 | RAG/vector | Only where semantic similarity earns it (match, similarity, review themes, preferences) | P4 |
 | Dashboard / track / alerts / history / settings | Personalization surface | P5/P6 |
