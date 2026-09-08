@@ -1,0 +1,47 @@
+name: Deploy
+
+# Example production deployment workflow. Wire in Vercel (web) and your
+# container platform (API/worker) credentials as GitHub Secrets.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  deploy-web:
+    name: Deploy web → Vercel
+    runs-on: ubuntu-latest
+    # Gate: only deploy when the web + backend CI checks passed (see ci.yml).
+    needs: []
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        working-directory: apps/web
+        run: npm ci --legacy-peer-deps
+      - name: Deploy to Vercel (preview)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx vercel --token '$VERCEL_TOKEN' --yes
+
+  deploy-backend:
+    name: Deploy API + worker (Docker)
+    runs-on: ubuntu-latest
+    # Replace with your container platform (Render/Railway/Fly) action/IaC.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migration gate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: echo "Run 'services/db' Alembic migrations against your prod DB before rollout"

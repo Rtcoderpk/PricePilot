@@ -1,0 +1,93 @@
+# PrismPilot root docker-compose — local development environment.
+#
+# Services:
+#   db     PostgreSQL 16 + pgvector (the same schema Supabase provides in prod)
+#   redis  cache + rate-limit store
+#   api    FastAPI service (uvicorn, reload) — applies migrations on start
+#   worker background process (Phase 1 starts as a no-op pump)
+#
+# Usage:
+#   docker compose up --build
+#   docker compose exec api alembic upgrade head   # if migration auto-run is off
+#
+# Ports: API on :8000, Postgres on :5432, Redis on :6379.
+
+name: pricepilot
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: pricepilot
+      POSTGRES_PASSWORD: pricepilot
+      POSTGRES_DB: pricepilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricepilot -d pricepilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://pricepilot:pricepilot@db:5432/pricepilot
+      REDIS_URL: redis://redis:6379/0
+      PRICEPILOT_SEARCH_PROVIDER: openfoodfacts
+      OFF_API_BASE_URL: https://world.openfoodfacts.org
+      CORS_ORIGIN: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "cd /srv/services/db && alembic upgrade head &&
+             cd /srv && uvicorn pricepilot.api:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./services/api:/srv/services/api
+      - ./services/db:/srv/services/db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://pricepilot:pricepilot@db:5432/pricepilot
+      REDIS_URL: redis://redis:6379/0
+      PRICEPILOT_SEARCH_PROVIDER: openfoodfacts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  db_data:

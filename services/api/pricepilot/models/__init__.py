@@ -1,0 +1,126 @@
+"""Domain models (Pydantic) used by the provider stack and API layer.
+
+These are transport/response schemas, validated on every boundary crossing.
+Raw provider data is normalized into these models before it is returned.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+
+class ProviderAvailability(str, Enum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+class RawOffer(BaseModel):
+    """An offer as fetched from a provider, before normalization/matching.
+
+    `data_source` names the provider; `is_fixture` flags dev-only demo data.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    provider: str
+    title: str
+    url: str | None = None
+    price_amount: float | None = None
+    price_currency: str = "USD"
+    availability: str | None = None
+    data_source: str = "provider"
+    is_fixture: bool = False
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class PriceInsight(BaseModel):
+    """Aggregate price view for a product, derived ONLY from recorded data."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    current: float | None = None
+    lowest_90d: float | None = None
+    avg_90d: float | None = None
+    currency: str = "USD"
+    sample_count: int = 0
+
+
+class ProductResult(BaseModel):
+    """A normalized product with its offers and derived insight.
+
+    In Phase 1, products are still provider-shape (matching/dedup lands in
+    Phase 2); `canonical_product_id` is the identifier we will coalesce onto.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    canonical_product_id: str
+    name: str
+    brand: str | None = None
+    category: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+    offers: list[RawOffer] = Field(default_factory=list)
+    price_insight: PriceInsight | None = None
+    is_fixture: bool = False
+
+
+class ProviderStatus(BaseModel):
+    """Declared capability state of a provider slot, surfaced to the UI."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    availability: ProviderAvailability
+    reason: str | None = None
+
+
+class SearchResponse(BaseModel):
+    """The full search result envelope returned to clients."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    query: str
+    products: list[ProductResult] = Field(default_factory=list)
+    providers: list[ProviderStatus] = Field(default_factory=list)
+    total: int = Field(default=0, description="Number of products returned")
+    generated_at: datetime | None = None
+    notice: str | None = Field(
+        default=None,
+        description="Human-readable note for the UI (e.g. demo-mode or partial-provider warning).",
+    )
+
+
+class SearchQuery(BaseModel):
+    """Request body for POST /api/v1/search."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+    max_results: int = Field(default=20, ge=1, le=100)
+
+
+class HealthStatus(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status: str = "ok"
+    app_version: str = "0.1.0"
+    database: str = "ok"
+    redis: str = "ok"
+    search_provider: str
+    search_provider_available: bool
+
+
+class ErrorResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    code: str
+    message: str
+    details: Any | None = None
