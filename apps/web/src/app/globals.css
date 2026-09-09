@@ -23,7 +23,7 @@
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83% 53%;
-    --radius: 0.5rem;
+    --radius: 0.625rem;
   }
 
   .dark {
@@ -55,5 +55,62 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Subtle motion primitives (no external animation plugin). All animations are
+   disabled under prefers-reduced-motion. */
+@layer utilities {
+  .animate-in {
+    animation: pp-fade-in 0.18s ease-out;
+  }
+  .animate-out {
+    animation: pp-fade-out 0.15s ease-in forwards;
+  }
+  .fade-in-0 {
+    animation-name: pp-fade-in;
+  }
+  .slide-in-from-top-2 {
+    animation-name: pp-slide-down;
+  }
+}
+
+@keyframes pp-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pp-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pp-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

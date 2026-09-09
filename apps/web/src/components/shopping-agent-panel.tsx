@@ -4,13 +4,16 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { formatPrice } from "@/components/price";
-import { Loader2, MessageSquare, Search, Sparkles } from "lucide-react";
-import { shoppingSearch, shoppingChat } from "@/lib/api";
+import { SibtBadge } from "@/components/sibt-badge";
 import { VoiceInput } from "@/components/voice-input";
 import { ImageUpload } from "@/components/image-upload";
-import { SibtBadge } from "@/components/sibt-badge";
+import { EmptyState, ErrorState, ProviderUnavailable, LoadingBlock } from "@/components/states";
+import { ShoppingAgentProductCard } from "@/components/shopping-product-card";
+import { Loader2, MessageSquare, Sparkles } from "lucide-react";
+import { shoppingSearch, shoppingChat } from "@/lib/api";
 import type { ShoppingAgentResponse } from "@/lib/types";
 
 type ViewState =
@@ -32,8 +35,7 @@ export function ShoppingAgentPanel() {
     if (!q) return;
     setView({ kind: "loading" });
     try {
-      const data =
-        mode === "chat" ? await shoppingChat(q, sessionId) : await shoppingSearch(q);
+      const data = mode === "chat" ? await shoppingChat(q, sessionId) : await shoppingSearch(q);
       if (mode === "chat") {
         setSessionId(data.session_id ?? undefined);
         if (data.conversation?.length) setConversation(data.conversation);
@@ -51,46 +53,57 @@ export function ShoppingAgentPanel() {
     setQuery(text);
   }
 
+  const isUnavailable =
+    view.kind === "result" && view.data.status === "provider_unavailable";
+
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant={mode === "search" ? "default" : "outline"}
-          onClick={() => setMode("search")}
-        >
-          <Search className="mr-1 h-3 w-3" /> Search
-        </Button>
-        <Button
-          size="sm"
-          variant={mode === "chat" ? "default" : "outline"}
-          onClick={() => setMode("chat")}
-        >
-          <MessageSquare className="mr-1 h-3 w-3" /> Chat
-        </Button>
+      {/* Mode + input */}
+      <div className="space-y-3">
+        <Tabs value={mode} onValueChange={(v) => setMode(v as "search" | "chat")}>
+          <TabsList>
+            <TabsTrigger value="search">
+              <Sparkles aria-hidden className="mr-1.5 h-3.5 w-3.5" /> Search
+            </TabsTrigger>
+            <TabsTrigger value="chat">
+              <MessageSquare aria-hidden className="mr-1.5 h-3.5 w-3.5" /> Chat
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <form onSubmit={run} className="flex flex-wrap items-center gap-2">
+          <div className="min-w-[240px] flex-1">
+            <label htmlFor="shopping-query" className="sr-only">
+              Ask the shopping agent
+            </label>
+            <Input
+              id="shopping-query"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={
+                mode === "chat"
+                  ? 'Try: "under 2 euros", "only sidi", "cheaper", "more results"'
+                  : 'e.g. "good 55 inch Samsung TV under 700"'
+              }
+              className="h-12"
+              aria-label="Ask the shopping agent"
+            />
+          </div>
+          <VoiceInput onTranscript={handleTranscript} />
+          <Button type="submit" size="lg" disabled={view.kind === "loading"}>
+            {view.kind === "loading" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            {mode === "chat" ? "Send" : "Ask PricePilot"}
+          </Button>
+        </form>
+
+        <ImageUpload onResult={(data) => setView({ kind: "result", data })} />
       </div>
 
-      <form onSubmit={run} className="flex max-w-2xl gap-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={
-            mode === "chat"
-              ? 'Try: "under 2 euros", "only sidi", "cheaper", "more results"'
-              : 'e.g. "good 55 inch Samsung TV under 700"'
-          }
-          className="h-12 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Ask the shopping agent"
-        />
-        <VoiceInput onTranscript={handleTranscript} />
-        <Button type="submit" size="lg" disabled={view.kind === "loading"}>
-          {view.kind === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {mode === "chat" ? "Send" : "Ask PricePilot"}
-        </Button>
-      </form>
-
-      <ImageUpload onResult={(data) => setView({ kind: "result", data })} />
-
+      {/* Conversation transcript (chat) */}
       {mode === "chat" && conversation.length > 0 ? (
         <Card>
           <CardHeader>
@@ -98,7 +111,10 @@ export function ShoppingAgentPanel() {
           </CardHeader>
           <CardContent className="max-h-48 space-y-2 overflow-y-auto">
             {conversation.map((m, i) => (
-              <div key={i} className={`text-sm ${m.role === "user" ? "text-right font-medium" : "text-muted-foreground"}`}>
+              <div
+                key={i}
+                className={`text-sm ${m.role === "user" ? "text-right font-medium" : "text-muted-foreground"}`}
+              >
                 {m.text}
               </div>
             ))}
@@ -106,22 +122,34 @@ export function ShoppingAgentPanel() {
         </Card>
       ) : null}
 
+      {/* Loading skeletons */}
       {view.kind === "loading" ? (
         <Card>
-          <CardContent className="flex items-center gap-3 p-6 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Researching products, prices, reviews, and sellers…
+          <CardContent className="p-6">
+            <LoadingBlock lines={4} />
+            <p className="mt-3 text-sm text-muted-foreground">
+              Researching products, prices, reviews, and sellers — only real data is used.
+            </p>
           </CardContent>
         </Card>
       ) : null}
 
+      {/* Error */}
       {view.kind === "error" ? (
-        <Card className="border-destructive/40">
-          <CardContent className="p-6 text-sm text-destructive">{view.message}</CardContent>
-        </Card>
+        <div>
+          <ErrorState title="The agent could not complete the request" description={view.message} />
+        </div>
       ) : null}
 
-      {view.kind === "result" ? <AgentResults data={view.data} /> : null}
+      {/* Provider unavailable (honest) */}
+      {isUnavailable ? (
+        <div>
+          <ProviderUnavailable description="The search provider could not supply results for this request. No products are displayed." />
+        </div>
+      ) : null}
+
+      {/* Results */}
+      {view.kind === "result" && !isUnavailable ? <AgentResults data={view.data} /> : null}
     </div>
   );
 }
@@ -130,9 +158,11 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
   const products = data.products ?? [];
   const recs = data.recommendations ?? [];
   const noProducts = products.length === 0;
+  const providerErrors = data.provider_errors ?? [];
 
   return (
     <div className="space-y-4">
+      {/* Intent */}
       {data.intent ? (
         <Card>
           <CardHeader>
@@ -144,10 +174,11 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
         </Card>
       ) : null}
 
+      {/* Recommendation callout */}
       {data.answer ? (
-        <Card className="border-primary/30">
+        <Card className="border-primary/30 bg-primary/[0.03]">
           <CardContent className="flex items-start gap-3 p-6">
-            <Sparkles className="mt-0.5 h-5 w-5 text-primary" />
+            <Sparkles className="mt-0.5 h-5 w-5 text-primary" aria-hidden />
             <div>
               <p className="font-medium">Recommendation</p>
               <p className="mt-1 text-sm text-muted-foreground">{data.answer}</p>
@@ -156,9 +187,10 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
         </Card>
       ) : null}
 
+      {/* Refinements (chat) */}
       {data.refinements?.length ? (
         <Card>
-          <CardContent className="space-y-0.5 p-6 text-xs text-muted-foreground">
+          <CardContent className="space-y-1 p-4 text-xs text-muted-foreground">
             {data.refinements.map((r, i) => (
               <p key={i}>understood: {r.note}</p>
             ))}
@@ -166,32 +198,43 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
         </Card>
       ) : null}
 
+      {/* Semantic status */}
       {data.semantic ? (
         <p className="text-xs text-muted-foreground">
           semantic search: <strong>{data.semantic}</strong>{" "}
-          {data.semantic === "keyword" ? "— embeddings not configured (falling back to keyword matching)" : ""}
+          {data.semantic === "keyword"
+            ? "— embeddings not configured (falling back to keyword matching)"
+            : ""}
         </p>
       ) : null}
 
-      {data.warnings?.length ? (
+      {/* Provider errors / warnings */}
+      {data.warnings?.length || providerErrors.length ? (
         <Card>
-          <CardContent className="space-y-1 p-6 text-xs text-muted-foreground">
-            {data.warnings.map((w, i) => (
-              <p key={i}>• {w}</p>
+          <CardContent className="space-y-1 p-4 text-xs text-muted-foreground">
+            {providerErrors.map((w, i) => (
+              <p key={`pe-${i}`}>provider: {w}</p>
+            ))}
+            {data.warnings?.map((w, i) => (
+              <p key={`w-${i}`}>• {w}</p>
             ))}
           </CardContent>
         </Card>
       ) : null}
 
-      {noProducts ? (
-        <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
-            No products were returned — the search provider may be rate-limited or returned no
-            results for this query.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
+      {/* Empty (no products, no provider errors) */}
+      {noProducts && providerErrors.length === 0 ? (
+        <div>
+          <EmptyState
+            title="No products were returned"
+            description="The search provider may be rate-limited or returned no results for this query."
+          />
+        </div>
+      ) : null}
+
+      {/* Products */}
+      {products.length > 0 ? (
+        <div className="space-y-3">
           {products.slice(0, 8).map((p) => {
             const rec = recs.find((r) => r.product_id === p.canonical_product_id);
             const deal = data.deal_scores?.[p.canonical_product_id];
@@ -200,111 +243,22 @@ function AgentResults({ data }: { data: ShoppingAgentResponse }) {
             const review = data.review_analysis?.[p.canonical_product_id];
             const sibt = data.sibt?.[p.canonical_product_id];
             const forecast = data.forecasts?.[p.canonical_product_id];
-            const best = price?.lowest_offer ?? p.price_insight?.current ?? null;
             return (
-              <Card key={p.canonical_product_id}>
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <SibtBadge sibt={sibt} />
-                        <h3 className="font-semibold">{p.name}</h3>
-                        {rec && !rec.matches_hard_constraints ? (
-                          <Badge variant="warning">outside budget</Badge>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {p.variant?.quantity_unit
-                          ? `pack: ${p.variant.quantity_unit}`
-                          : p.category ?? p.brand}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-semibold">
-                        {best != null
-                          ? formatPrice(best, price?.currency ?? rec?.currency ?? undefined)
-                          : "no price"}
-                      </p>
-                      {deal?.score != null ? (
-                        <Badge variant="success" className="mt-1">
-                          Deal Score {Math.round(deal.score)} · {deal.label}
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="mt-1">
-                          insufficient data
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-
-                  {sibt ? (
-                    <ul className="mt-3 space-y-1 rounded-md border bg-muted/20 p-2 text-xs text-muted-foreground">
-                      {sibt.reasons.map((r, i) => (
-                        <li key={i}>• {r}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-
-                  {rec?.reasons?.length ? (
-                    <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-                      {rec.reasons.map((r, i) => (
-                        <li key={i}>• {r}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-
-                  {p.offers.length > 0 ? (
-                    <div className="mt-3 grid gap-1 rounded-md border bg-muted/30 p-2 text-xs">
-                      {p.offers.map((o, i) => (
-                        <div key={i} className="flex items-center justify-between gap-2">
-                          <span className="truncate">{o.provider || o.data_source}</span>
-                          <span>
-                            {o.price_amount != null ? formatPrice(o.price_amount, o.price_currency) : "no price"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <Separator className="my-3" />
-                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
-                    <span>
-                      seller: <strong>{seller?.label ?? "insufficient_data"}</strong>
-                    </span>
-                    <span>
-                      price: <strong>{price?.price_position ?? "insufficient_history"}</strong>
-                    </span>
-                    <span>
-                      reviews:{" "}
-                      <strong>
-                        {review?.status === "available"
-                          ? `${review.review_count ?? 0} reviews`
-                          : "unavailable"}
-                      </strong>
-                    </span>
-                    {forecast && forecast.status === "available" ? (
-                      <span>
-                        forecast:{" "}
-                        <strong>
-                          {forecast.forecast_next != null ? formatPrice(forecast.forecast_next) : "—"} ({formatPrice(forecast.lower_bound ?? 0)}–{formatPrice(forecast.upper_bound ?? 0)})
-                        </strong>
-                      </span>
-                    ) : null}
-                    {forecast && forecast.status === "insufficient_history" ? (
-                      <span>
-                        forecast: <strong>insufficient history</strong>
-                      </span>
-                    ) : null}
-                    {deal?.components ? (
-                      <span>components: {Object.values(deal.components).slice(0, 3).map((v) => Number(v).toFixed(0)).join(" / ")}</span>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
+              <ShoppingAgentProductCard
+                key={p.canonical_product_id}
+                product={p}
+                recommendation={rec}
+                deal={deal}
+                price={price}
+                seller={seller}
+                review={review}
+                sibt={sibt}
+                forecast={forecast}
+              />
             );
           })}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -334,4 +288,8 @@ function IntentChips({ intent }: { intent: NonNullable<ShoppingAgentResponse["in
       ))}
     </div>
   );
+}
+
+export function formatShoppingPrice(v: number | null | undefined): string {
+  return v != null ? formatPrice(v) : "—";
 }

@@ -19,7 +19,13 @@ export function ProductImage({
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} loading="lazy" className={`h-28 w-28 rounded-md object-cover ${className ?? ""}`} />
+    <Image
+      src={src}
+      alt={alt}
+      width={112}
+      height={112}
+      loading="lazy"
+      className={`h-28 w-28 rounded-md object-cover ${className ?? ""}`}
+    />
   );
 }

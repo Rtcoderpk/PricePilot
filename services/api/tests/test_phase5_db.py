@@ -143,3 +143,35 @@ async def test_analytics_available_two_observations():
             assert a.highest_observed == 50.0
     finally:
         await _cleanup([pid])
+
+
+async def test_tracking_movement_down_after_observations():
+    pid, oid = await _seed_product_offer()
+    try:
+        async with SessionLocal() as s:
+            await record_observation(s, Observation(product_id=pid, offer_id=oid, amount=50.0, currency="USD"))
+            await record_observation(s, Observation(product_id=pid, offer_id=oid, amount=45.0, currency="USD"))
+            from pricepilot.services.monitoring_api import _tracking_movement
+
+            m = await _tracking_movement(s, pid)
+            assert m["current_price"] == 45.0
+            assert m["previous_price"] == 50.0
+            assert m["percentage_change"] == -10.0
+            assert m["movement"] == "down"
+            assert m["observation_count"] == 2
+    finally:
+        await _cleanup([pid])
+
+
+async def test_tracking_movement_unknown_without_history():
+    pid, oid = await _seed_product_offer()
+    try:
+        async with SessionLocal() as s:
+            from pricepilot.services.monitoring_api import _tracking_movement
+
+            m = await _tracking_movement(s, pid)
+            assert m["current_price"] is None
+            assert m["movement"] == "unknown"
+            assert m["observation_count"] == 0
+    finally:
+        await _cleanup([pid])

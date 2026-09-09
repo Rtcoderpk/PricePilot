@@ -1,12 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageContainer } from "@/components/container";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PriceChart } from "@/components/price-chart";
 import { formatPrice } from "@/components/price";
+import { PriceChange } from "@/components/price-change";
+import { AnalyticsRow } from "@/components/analytics-row";
+import { ErrorState, InsufficientData, LoadingBlock, EmptyState } from "@/components/states";
 import { priceHistory, trackingList } from "@/lib/api";
+import type { HistoryObservation } from "@/lib/api";
+
+type Range = "all" | 30 | 90;
+
+const RANGE_DAYS: Record<Range, number | null> = { all: null, 30: 30, 90: 90 };
 
 export default function HistoryPage() {
   const [tracks, setTracks] = useState<Awaited<ReturnType<typeof trackingList>>>([]);
@@ -14,9 +24,10 @@ export default function HistoryPage() {
   const [history, setHistory] = useState<Awaited<ReturnType<typeof priceHistory>> | null>(null);
   const [status, setStatus] = useState<string>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState<Range>("all");
+  const [cutoffAt, setCutoffAt] = useState<number | null>(null); // ms; set on user range change only
 
   useEffect(() => {
-    // fetch-on-mount: setState only happens after the awaited fetch resolves
     (async () => {
       try {
         const t = await trackingList();
@@ -49,128 +60,194 @@ export default function HistoryPage() {
     }
   }
 
+  // Range filtering is only ever applied to REAL observations. If the chosen
+  // range leaves fewer than 2 points, we show the honest insufficient state.
+  const filtered = (() => {
+    if (!history) return [] as HistoryObservation[];
+    if (cutoffAt == null) return history.observations;
+    return history.observations.filter((o) => new Date(o.observed_at).getTime() >= cutoffAt);
+  })();
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <PageContainer>
       <PageHeader
         title="Price history"
         description="Real recorded observations for tracked products — never synthetic."
       />
 
-      {status === "loading" ? <p className="mt-6 text-sm text-muted-foreground">Loading…</p> : null}
-      {status === "no_tracking" ? (
-        <Card className="mt-6">
-          <CardContent className="p-6 text-sm text-muted-foreground">
-            No products are tracked yet. Track a product to collect price history over time.
-          </CardContent>
-        </Card>
+      {status === "loading" ? (
+        <div className="mt-6">
+          <LoadingBlock lines={4} />
+        </div>
       ) : null}
+
+      {status === "no_tracking" ? (
+        <div className="mt-6">
+          <EmptyState
+            title="No products are tracked yet"
+            description="Track a product to collect price history over time."
+          />
+        </div>
+      ) : null}
+
       {status === "error" ? (
-        <Card className="mt-6 border-destructive/40">
-          <CardContent className="p-6 text-sm text-destructive">{error ?? "Failed to load history."}</CardContent>
-        </Card>
+        <div className="mt-6">
+          <ErrorState title="Could not load history" description={error ?? undefined} />
+        </div>
       ) : null}
 
       {status === "ok" && history ? (
         <div className="mt-6 space-y-4">
+          {/* Product selector */}
           <div className="flex flex-wrap gap-2">
             {tracks.map((t) => (
-              <button
+              <Button
                 key={t.id}
+                size="sm"
+                variant={selected === t.product_id ? "default" : "outline"}
                 onClick={() => select(t.product_id)}
-                className={`rounded-full border px-3 py-1 text-xs ${selected === t.product_id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
               >
                 {t.name}
-              </button>
+              </Button>
             ))}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardContent className="space-y-2 p-6 text-sm">
-                <h3 className="font-semibold">Analytics</h3>
-                <AnalyticsRow label="Status" value={history.analytics.status === "available" ? "Available" : "Insufficient history"} />
-                <AnalyticsRow label="Observations" value={String(history.analytics.observation_count)} />
-                <AnalyticsRow
-                  label="Current price"
-                  value={
-                    history.analytics.current_price != null
-                      ? formatPrice(history.analytics.current_price, history.currency ?? undefined)
-                      : "—"
-                  }
-                />
-                <AnalyticsRow
-                  label="Change"
-                  value={
-                    history.analytics.percentage_change != null
-                      ? `${history.analytics.percentage_change > 0 ? "+" : ""}${history.analytics.percentage_change}%`
-                      : "—"
-                  }
-                />
-                <AnalyticsRow
-                  label="Lowest observed"
-                  value={
-                    history.analytics.lowest_observed != null
-                      ? formatPrice(history.analytics.lowest_observed, history.currency ?? undefined)
-                      : "—"
-                  }
-                />
-                <AnalyticsRow
-                  label="Highest observed"
-                  value={
-                    history.analytics.highest_observed != null
-                      ? formatPrice(history.analytics.highest_observed, history.currency ?? undefined)
-                      : "—"
-                  }
-                />
-                {history.analytics.trend ? (
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="text-muted-foreground">Trend:</span>
-                    <Badge variant={history.analytics.trend === "down" ? "success" : "secondary"}>
-                      {history.analytics.trend}
-                    </Badge>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <h3 className="mb-2 font-semibold">Chart</h3>
-                <PriceChart points={history.observations} currency={history.currency} />
-              </CardContent>
-            </Card>
-          </div>
+          {/* Range control (only shown when there is history) */}
+          {history.observations.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Range:</span>
+              {(["all", 30, 90] as Range[]).map((r) => {
+                const days = RANGE_DAYS[r];
+                return (
+                  <Button
+                    key={r}
+                    size="sm"
+                    variant={range === r ? "default" : "outline"}
+                    onClick={() => {
+                      setRange(r);
+                      setCutoffAt(days == null ? null : Date.now() - days * 24 * 60 * 60 * 1000);
+                    }}
+                  >
+                    {r === "all" ? "All" : `${r}d`}
+                  </Button>
+                );
+              })}
+            </div>
+          ) : null}
 
-          <Card>
-            <CardContent className="p-6">
-              <h3 className="mb-2 font-semibold">Observations</h3>
-              {history.observations.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No observations recorded yet for this product.</p>
-              ) : (
-                <div className="max-h-72 space-y-1 overflow-y-auto text-xs">
-                  {history.observations.map((o, i) => (
-                    <div key={i} className="flex items-center justify-between rounded bg-muted/30 px-2 py-1">
-                      <span>{new Date(o.observed_at).toLocaleString()}</span>
-                      <span className="font-medium">
-                        {formatPrice(o.amount, o.currency)}
-                        {o.source ? <span className="ml-2 text-muted-foreground">({o.source})</span> : null}
-                      </span>
+          {filtered.length < 2 ? (
+            <div className="mt-4">
+              <InsufficientData
+                title={history.observations.length < 2 ? "Not enough historical data yet" : "No observations in this range"}
+                description={
+                  history.observations.length < 2
+                    ? "Price history is collected over time as real observations. Once enough samples exist, charts and analytics will appear here."
+                    : "There are no recorded observations within the selected time range."
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card>
+                  <CardContent className="space-y-2 p-6 text-sm">
+                    <h3 className="font-semibold">Analytics</h3>
+                    <AnalyticsRow
+                      label="Status"
+                      value={
+                        <Badge variant={history.analytics.status === "available" ? "success" : "secondary"}>
+                          {history.analytics.status === "available" ? "Available" : "Insufficient history"}
+                        </Badge>
+                      }
+                    />
+                    <AnalyticsRow label="Observations" value={String(history.analytics.observation_count)} />
+                    <AnalyticsRow
+                      label="Current price"
+                      value={
+                        history.analytics.current_price != null
+                          ? formatPrice(history.analytics.current_price, history.currency)
+                          : "—"
+                      }
+                    />
+                    <AnalyticsRow
+                      label="Change"
+                      value={<PriceChange current={history.analytics.current_price} previous={history.analytics.previous_price} />}
+                    />
+                    <AnalyticsRow
+                      label="Lowest observed"
+                      value={
+                        history.analytics.lowest_observed != null
+                          ? formatPrice(history.analytics.lowest_observed, history.currency)
+                          : "—"
+                      }
+                    />
+                    <AnalyticsRow
+                      label="Highest observed"
+                      value={
+                        history.analytics.highest_observed != null
+                          ? formatPrice(history.analytics.highest_observed, history.currency)
+                          : "—"
+                      }
+                    />
+                    <AnalyticsRow
+                      label="Average observed"
+                      value={
+                        history.analytics.average_observed != null
+                          ? formatPrice(history.analytics.average_observed, history.currency)
+                          : "—"
+                      }
+                    />
+                    {history.analytics.trend ? (
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">Trend</span>
+                        <Badge variant={history.analytics.trend === "down" ? "success" : "secondary"}>
+                          {history.analytics.trend}
+                        </Badge>
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="mb-2 font-semibold">Chart</h3>
+                    <PriceChart points={filtered} currency={history.currency} />
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardContent className="p-6">
+                  <h3 className="mb-2 font-semibold">Observations</h3>
+                  {filtered.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No observations recorded yet for this product.</p>
+                  ) : (
+                    <div className="max-h-72 overflow-y-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="uppercase text-muted-foreground">
+                          <tr>
+                            <th className="py-2 pr-4 font-medium">When</th>
+                            <th className="py-2 pr-4 font-medium">Price</th>
+                            <th className="py-2 font-medium">Source</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((o, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="py-2 pr-4 text-muted-foreground">{new Date(o.observed_at).toLocaleString()}</td>
+                              <td className="py-2 pr-4 font-medium">{formatPrice(o.amount, o.currency)}</td>
+                              <td className="py-2 text-muted-foreground">{o.source ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function AnalyticsRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
+    </PageContainer>
   );
 }

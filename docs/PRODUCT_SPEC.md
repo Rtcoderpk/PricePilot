@@ -68,18 +68,18 @@ These constraints override all feature ambition:
 
 ## 5. Page map
 
-| Route | Purpose | Phase |
-|---|---|---|
-| `/` | Landing: hero input → AI search | P6 |
-| `/search` | Results from an intent run | P6 |
-| `/product/[id]` | Detail + offers + price history + reviews + SIBT | P6 |
-| `/compare` | Side-by-side comparison | P6 |
-| `/track` | Tracked products | P6 |
-| `/alerts` | Price alerts | P6 |
-| `/history` | Price history charts | P6 |
-| `/shopping` | AI shopping chat | P6 |
-| `/settings` | Preferences/profile | P6 |
-| `/dashboard` | Personalized overview | P6 |
+| Route | Purpose | Phase | Status |
+|---|---|---|---|
+| `/` | Landing: hero input → AI search | P6 | done |
+| `/search` | Results from an intent run | P6 | done |
+| `/product/[id]` | Detail + price history + analytics + track | P6 | done (history/analytics; full offers+reviews surface pending provider data) |
+| `/compare` | Side-by-side price intelligence | P6 | done (real recorded observation analytics) |
+| `/track` | Tracked products | P6 | done |
+| `/alerts` | Price alerts | P6 | done |
+| `/history` | Price history charts | P6 | done |
+| `/shopping` | AI shopping chat | P6 | done |
+| `/settings` | Preferences/profile | P6 | done |
+| `/dashboard` | Personalized overview | P6 | done |
 
 ## 6. Product cards (search results) must show
 

@@ -123,6 +123,11 @@ export type TrackingItem = {
   paused: boolean;
   last_monitor_status?: string | null;
   last_observed_at?: string | null;
+  current_price?: number | null;
+  previous_price?: number | null;
+  percentage_change?: number | null;
+  movement?: "up" | "down" | "flat" | "unknown" | null;
+  observation_count?: number;
 };
 
 export type HistoryObservation = {

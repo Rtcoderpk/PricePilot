@@ -70,8 +70,9 @@ async def list_tracking(session, *, user_id: str) -> list[dict[str, Any]]:
         ),
         {"uid": user_id},
     )).mappings().all()
-    return [
-        {
+    result: list[dict[str, Any]] = []
+    for r in rows:
+        item = {
             "id": str(r["id"]),
             "product_id": str(r["product_id"]),
             "name": r["name"],
@@ -83,8 +84,9 @@ async def list_tracking(session, *, user_id: str) -> list[dict[str, Any]]:
             "last_observed_at": r["last_observed_at"].isoformat() if r["last_observed_at"] else None,
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         }
-        for r in rows
-    ]
+        item.update(await _tracking_movement(session, str(r["product_id"])))
+        result.append(item)
+    return result
 
 
 async def get_tracking(session, *, user_id: str, watchlist_id: str) -> dict[str, Any] | None:
@@ -100,7 +102,7 @@ async def get_tracking(session, *, user_id: str, watchlist_id: str) -> dict[str,
     )).mappings().first()
     if not row:
         return None
-    return {
+    item = {
         "id": str(row["id"]),
         "product_id": str(row["product_id"]),
         "name": row["name"],
@@ -111,6 +113,8 @@ async def get_tracking(session, *, user_id: str, watchlist_id: str) -> dict[str,
         "last_monitor_status": row["last_monitor_status"],
         "last_observed_at": row["last_observed_at"].isoformat() if row["last_observed_at"] else None,
     }
+    item.update(await _tracking_movement(session, str(row["product_id"])))
+    return item
 
 
 async def update_tracking(
@@ -266,6 +270,49 @@ def _provider_available() -> bool:
     from pricepilot.monitoring.price_source import price_source_status
 
     return price_source_status() == "available"
+
+
+async def _tracking_movement(session, product_id: str) -> dict[str, Any]:
+    """Derive current/previous price + movement from real recorded history.
+
+    Additive view data only — no schema change. Returns honest nulls when there
+    is insufficient history rather than fabricating a movement.
+    """
+    if not product_id:
+        return {
+            "current_price": None,
+            "previous_price": None,
+            "percentage_change": None,
+            "movement": "unknown",
+            "observation_count": 0,
+        }
+    try:
+        analytics = await compute_analytics(session, product_id)
+        cur = float(analytics.current_price) if analytics.current_price is not None else None
+        prev = float(analytics.previous_price) if analytics.previous_price is not None else None
+        pct = float(analytics.percentage_change) if analytics.percentage_change is not None else None
+        count = int(analytics.observation_count or 0)
+    except Exception:
+        log.exception("tracking: movement derivation failed for %s", product_id)
+        cur = prev = pct = None
+        count = 0
+
+    if cur is None or prev is None or count < 2:
+        movement = "unknown"
+    elif abs(pct or 0) < 0.005:
+        movement = "flat"
+    elif (pct or 0) < 0:
+        movement = "down"
+    else:
+        movement = "up"
+
+    return {
+        "current_price": cur,
+        "previous_price": prev,
+        "percentage_change": pct,
+        "movement": movement,
+        "observation_count": count,
+    }
 
 
 def _json_str(data: dict) -> str:

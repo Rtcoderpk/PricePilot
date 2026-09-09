@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageContainer } from "@/components/container";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { ErrorState, LoadingBlock } from "@/components/states";
+import { CheckCircle2 } from "lucide-react";
 import { preferencesGet, preferencesUpdate } from "@/lib/api";
 import type { UserPreferences } from "@/lib/api";
 
 const CONDITIONS = ["new", "refurbished", "any"];
+const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD"];
 
 export default function SettingsPage() {
   const [prefs, setPrefs] = useState<UserPreferences | null>(null);
@@ -17,7 +24,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // local form state
   const [brands, setBrands] = useState("");
   const [budget, setBudget] = useState("");
   const [stores, setStores] = useState("");
@@ -25,6 +31,7 @@ export default function SettingsPage() {
   const [priceVsQuality, setPriceVsQuality] = useState("");
   const [currency, setCurrency] = useState("");
   const [locale, setLocale] = useState("");
+  const [emailAlerts, setEmailAlerts] = useState(false);
 
   function hydrate(p: UserPreferences | null) {
     if (!p) return;
@@ -49,7 +56,6 @@ export default function SettingsPage() {
         setLoaded(true);
       }
     })();
-    // fetch-on-mount only
   }, []);
 
   function toggleCondition(c: string) {
@@ -82,90 +88,149 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10">
+    <PageContainer>
       <PageHeader
         title="Settings & preferences"
-        description="Brands, budget, preferred stores, condition, and price-vs-quality weighting."
+        description="Shopping and monitoring preferences that personalize PricePilot."
       />
 
-      {!loaded ? <p className="mt-6 text-sm text-muted-foreground">Loading…</p> : null}
-      {error ? (
-        <Card className="mt-4 border-destructive/40">
-          <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
-        </Card>
-      ) : null}
-      {loaded && !prefs ? (
-        <Card className="mt-4">
-          <CardContent className="p-6 text-sm text-muted-foreground">
-            No preferences saved yet. These settings personalize shopping recommendations.
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <form onSubmit={save} className="mt-6 space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Preferences</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-muted-foreground">Preferred brands (comma-separated)</span>
-              <Input value={brands} onChange={(e) => setBrands(e.target.value)} placeholder="e.g. Acme, Globex" />
-            </label>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">Max budget (0 clears)</span>
-                <Input value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 500" inputMode="decimal" />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">Currency code</span>
-                <Input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="e.g. USD" maxLength={3} />
-              </label>
-            </div>
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-muted-foreground">Preferred stores (comma-separated)</span>
-              <Input value={stores} onChange={(e) => setStores(e.target.value)} placeholder="e.g. Store A, Store B" />
-            </label>
-            <div>
-              <span className="mb-1 block text-xs font-medium text-muted-foreground">Preferred condition</span>
-              <div className="flex flex-wrap gap-2">
-                {CONDITIONS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => toggleCondition(c)}
-                    className={`rounded-full border px-3 py-1 text-xs ${condition.includes(c) ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">Price vs quality (0–1)</span>
-                <Input
-                  value={priceVsQuality}
-                  onChange={(e) => setPriceVsQuality(e.target.value)}
-                  placeholder="e.g. 0.7"
-                  inputMode="decimal"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">Shopping locale</span>
-                <Input value={locale} onChange={(e) => setLocale(e.target.value)} placeholder="e.g. en-US" />
-              </label>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save preferences"}
-          </Button>
-          {saved ? <span className="text-sm text-muted-foreground">Saved.</span> : null}
+      {!loaded ? (
+        <div className="mt-6">
+          <LoadingBlock lines={4} />
         </div>
-      </form>
-    </div>
+      ) : null}
+
+      {error ? (
+        <div className="mt-4">
+          <ErrorState title="Could not load preferences" description={error} />
+        </div>
+      ) : null}
+
+      {loaded ? (
+        <form onSubmit={save} className="mt-6 space-y-4">
+          {/* Shopping preferences */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Shopping preferences</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <div className="space-y-1">
+                <Label htmlFor="brands" className="text-xs font-medium text-muted-foreground">
+                  Preferred brands (comma-separated)
+                </Label>
+                <Input id="brands" value={brands} onChange={(e) => setBrands(e.target.value)} placeholder="e.g. Acme, Globex" />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="budget" className="text-xs font-medium text-muted-foreground">
+                    Max budget (0 clears)
+                  </Label>
+                  <Input id="budget" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 500" inputMode="decimal" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">Currency</Label>
+                  <Select value={currency || undefined} onValueChange={setCurrency}>
+                    <SelectTrigger aria-label="Preferred currency" className="w-full">
+                      <SelectValue placeholder="e.g. USD" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="stores" className="text-xs font-medium text-muted-foreground">
+                  Preferred stores (comma-separated)
+                </Label>
+                <Input id="stores" value={stores} onChange={(e) => setStores(e.target.value)} placeholder="e.g. Store A, Store B" />
+              </div>
+
+              <div>
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">Preferred condition</span>
+                <div className="flex flex-wrap gap-2">
+                  {CONDITIONS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => toggleCondition(c)}
+                      className={`rounded-full border px-3 py-1 text-xs ${condition.includes(c) ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="pvq" className="text-xs font-medium text-muted-foreground">
+                    Price vs quality (0–1)
+                  </Label>
+                  <Input id="pvq" value={priceVsQuality} onChange={(e) => setPriceVsQuality(e.target.value)} placeholder="e.g. 0.7" inputMode="decimal" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="locale" className="text-xs font-medium text-muted-foreground">
+                    Shopping locale
+                  </Label>
+                  <Input id="locale" value={locale} onChange={(e) => setLocale(e.target.value)} placeholder="e.g. en-US" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Monitoring preferences */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Monitoring & notifications</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Email alert delivery</p>
+                  <p className="text-xs text-muted-foreground">
+                    Requires an SMTP provider to be configured server-side. Until then, alerts persist in-app only.
+                  </p>
+                </div>
+                <Switch checked={emailAlerts} onCheckedChange={setEmailAlerts} aria-label="Email alert delivery" />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Note: external email delivery is available only when the API has SMTP configured. In-app alerts always record.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Account / session */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Account & session</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm">
+              <p className="text-muted-foreground">
+                Authentication is deferred. Identity is a per-browser demo user (UUID) while real account auth is wired in a
+                later phase. No account is created beyond your local preferences.
+              </p>
+            </CardContent>
+          </Card>
+
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save preferences"}
+            </Button>
+            {saved ? (
+              <span className="inline-flex items-center gap-1 text-sm text-emerald-700" role="status">
+                <CheckCircle2 aria-hidden className="h-4 w-4" /> Saved.
+              </span>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
+    </PageContainer>
   );
 }

@@ -92,6 +92,27 @@ def test_tracking_requires_user(client):
     assert r.status_code == 401
 
 
+def test_tracking_movement_fields_honest(client):
+    """Tracking response carries real movement fields; with no history they are
+    honestly empty (never fabricated)."""
+    pid = _insert_product(_dsn())
+    try:
+        r = client.post("/api/v1/tracking", json={"product_id": pid}, headers={"X-User-Id": ALICE})
+        assert r.status_code in (200, 201)
+        wl_id = r.json()["id"]
+
+        r2 = client.get(f"/api/v1/tracking/{wl_id}", headers={"X-User-Id": ALICE})
+        body = r2.json()
+        # No observation history → movement is honestly "unknown", no fake price.
+        assert body["current_price"] is None
+        assert body["previous_price"] is None
+        assert body["percentage_change"] is None
+        assert body["movement"] == "unknown"
+        assert body["observation_count"] == 0
+    finally:
+        _cleanup(pid)
+
+
 def test_alerts_requires_user(client):
     r = client.get("/api/v1/alerts", headers={"X-User-Id": ALICE})
     assert r.status_code == 200
