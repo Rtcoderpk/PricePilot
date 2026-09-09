@@ -61,11 +61,10 @@ export async function shoppingChat(
   query: string,
   sessionId?: string,
 ): Promise<ShoppingAgentResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/shopping/chat`, {
+  const res = await authFetch("/api/v1/shopping/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, session_id: sessionId }),
-    cache: "no-store",
   });
   return parseResponse<ShoppingAgentResponse>(res);
 }

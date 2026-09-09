@@ -212,10 +212,10 @@ class TrackCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    product_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1, max_length=64)
     target_price: float | None = Field(default=None, ge=0)
     target_currency: str | None = Field(default=None, max_length=3)
-    alert_preferences: dict[str, bool] | None = Field(default=None)
+    alert_preferences: dict[str, bool] | None = Field(default=None, max_length=16)
 
 
 class TrackUpdate(BaseModel):
@@ -225,7 +225,7 @@ class TrackUpdate(BaseModel):
 
     target_price: float | None = Field(default=None, ge=0, description="Set to change; omit to leave unchanged. Use 0 to clear.")
     target_currency: str | None = Field(default=None, max_length=3)
-    alert_preferences: dict[str, bool] | None = Field(default=None)
+    alert_preferences: dict[str, bool] | None = Field(default=None, max_length=16)
     paused: bool | None = Field(default=None)
 
 
@@ -272,7 +272,7 @@ class UserPreferencesUpdate(BaseModel):
 
     preferred_brands: list[str] | None = Field(default=None, max_length=50)
     max_budget: float | None = Field(default=None, ge=0, description="Use 0 to clear budget.")
-    min_specs: dict[str, Any] | None = None
+    min_specs: dict[str, Any] | None = Field(default=None, max_length=32)
     preferred_stores: list[str] | None = Field(default=None, max_length=50)
     preferred_condition: list[str] | None = Field(default=None, max_length=10)
     price_vs_quality: float | None = Field(default=None, ge=0, le=1)

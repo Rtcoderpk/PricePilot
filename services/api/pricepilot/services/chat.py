@@ -28,17 +28,34 @@ async def run_chat(
     session_id: str | None = None,
     user_id: str | None = None,
 ) -> dict:
-    """Process one chat turn: load/create session, refine, run graph, persist."""
+    """Process one chat turn: load/create session, refine, run graph, persist.
+
+    Ownership: a client-supplied `session_id` is only honored when it belongs to
+    this `user_id` (or to the anonymous legacy pool when `user_id` is None).
+    Cross-user sessions are never loaded — the caller gets a not_found result.
+    """
     async with SessionLocal() as db:
         sid = session_id or await _create_session(db, query, user_id)
+        if session_id and not await _session_belongs_to(db, session_id, user_id or ""):
+            log.warning("chat session %s requested but not owned by %s", session_id, user_id)
+            return {
+                "status": "not_found",
+                "session_id": session_id,
+                "query": query,
+                "answer": None,
+                "conversation": [],
+                "warnings": ["Session not found or not owned by this user."],
+                "products": [],
+                "recommendations": [],
+            }
         # load existing filters/messages for context
-        filters, messages = await _load_session(db, sid)
+        filters, messages = await _load_session(db, sid, user_id=user_id)
 
         # try to parse as a refinement of an ongoing conversation
         refinement = parse_refinement(query)
         if refinement.applied and filters:
             note = refinement.note or "Refinement applied."
-            updated_filters = await _apply_refinement(db, sid, filters, refinement, note)
+            updated_filters = await _apply_refinement(db, sid, filters, refinement, note, user_id=user_id)
         else:
             updated_filters = filters
 
@@ -62,8 +79,8 @@ async def run_chat(
             "ts": _now_iso(),
         }
         messages = messages + [user_msg, assistant_msg]
-        await _append_messages(db, sid, messages)
-        await _update_session_status(db, sid, _status_of(state))
+        await _append_messages(db, sid, messages, user_id=user_id)
+        await _update_session_status(db, sid, _status_of(state), user_id=user_id)
 
         return {
             "status": "ok",
@@ -107,15 +124,38 @@ async def _create_session(db, first_query: str, user_id: str | None) -> str:
     return sid
 
 
-async def _load_session(db, sid: str) -> tuple[dict, list[dict]]:
+def _owner_clause(user_id: str | None = None) -> tuple[str, dict]:
+    """Return a SQL owner filter + params. Anonymous legacy sessions are
+    `user_id IS NULL`; authenticated sessions must match exactly."""
+    if user_id:
+        return "AND user_id = :owner", {"owner": user_id}
+    return "AND user_id IS NULL", {}
+
+
+async def _session_belongs_to(db, sid: str, user_id: str | None) -> bool:
+    try:
+        owner_sql, owner_params = _owner_clause(user_id)
+        row = await db.execute(
+            text(f"SELECT id FROM shopping_sessions WHERE id = :sid {owner_sql}"),
+            {"sid": sid, **owner_params},
+        )
+        return row.mappings().first() is not None
+    except Exception:
+        log.exception("chat session ownership check failed")
+        return False
+
+
+async def _load_session(db, sid: str, *, user_id: str | None = None) -> tuple[dict, list[dict]]:
     filters: dict = {}
     messages: list[dict] = []
     try:
+        owner_sql, owner_params = _owner_clause(user_id)
         row = await db.execute(
             text(
-                "SELECT applied_filters, messages FROM shopping_sessions WHERE id = :sid AND status='active'"
+                "SELECT applied_filters, messages FROM shopping_sessions "
+                f"WHERE id = :sid AND status='active' {owner_sql}"
             ),
-            {"sid": sid},
+            {"sid": sid, **owner_params},
         )
         result = row.mappings().first()
         if result:
@@ -126,7 +166,7 @@ async def _load_session(db, sid: str) -> tuple[dict, list[dict]]:
     return filters, messages
 
 
-async def _apply_refinement(db, sid: str, filters: dict, refinement, note: str) -> dict:
+async def _apply_refinement(db, sid: str, filters: dict, refinement, note: str, *, user_id: str | None = None) -> dict:
     updated = dict(filters)
     kind = refinement.kind
     if kind == "brand_allow" and refinement.value:
@@ -145,11 +185,13 @@ async def _apply_refinement(db, sid: str, filters: dict, refinement, note: str) 
         updated["show_more"] = True
     # note already persisted below via the updated filters/messages
     try:
+        owner_sql, owner_params = _owner_clause(user_id)
         await db.execute(
             text(
-                "UPDATE shopping_sessions SET applied_filters = :filters, updated_at = now() WHERE id = :sid"
+                "UPDATE shopping_sessions SET applied_filters = :filters, updated_at = now() "
+                f"WHERE id = :sid {owner_sql}"
             ),
-            {"filters": updated, "sid": sid},
+            {"filters": updated, "sid": sid, **owner_params},
         )
         await db.commit()
     except Exception:
@@ -157,22 +199,27 @@ async def _apply_refinement(db, sid: str, filters: dict, refinement, note: str) 
     return updated
 
 
-async def _append_messages(db, sid: str, messages: list[dict]) -> None:
+async def _append_messages(db, sid: str, messages: list[dict], *, user_id: str | None = None) -> None:
     try:
+        owner_sql, owner_params = _owner_clause(user_id)
         await db.execute(
-            text("UPDATE shopping_sessions SET messages = :msgs, updated_at = now() WHERE id = :sid"),
-            {"msgs": messages, "sid": sid},
+            text(
+                "UPDATE shopping_sessions SET messages = :msgs, updated_at = now() "
+                f"WHERE id = :sid {owner_sql}"
+            ),
+            {"msgs": messages, "sid": sid, **owner_params},
         )
         await db.commit()
     except Exception:
         log.exception("append chat messages failed")
 
 
-async def _update_session_status(db, sid: str, status: str) -> None:
+async def _update_session_status(db, sid: str, status: str, *, user_id: str | None = None) -> None:
     try:
+        owner_sql, owner_params = _owner_clause(user_id)
         await db.execute(
-            text("UPDATE shopping_sessions SET status = :st WHERE id = :sid"),
-            {"st": status, "sid": sid},
+            text(f"UPDATE shopping_sessions SET status = :st WHERE id = :sid {owner_sql}"),
+            {"st": status, "sid": sid, **owner_params},
         )
         await db.commit()
     except Exception:

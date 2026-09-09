@@ -21,8 +21,10 @@ services:
       POSTGRES_USER: pricepilot
       POSTGRES_PASSWORD: pricepilot
       POSTGRES_DB: pricepilot
+    # Host publish bound to loopback only: reachable for local dev + tests,
+    # not exposed to the LAN (service-to-service traffic uses the docker net).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -35,7 +37,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

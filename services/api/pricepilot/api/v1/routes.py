@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -23,7 +24,12 @@ from pricepilot.models import (
     TrackUpdate,
     UserPreferencesUpdate,
 )
-from pricepilot.services.image import ImageValidationError, identify_image, validate_image
+from pricepilot.services.image import (
+    MAX_BYTES,
+    ImageValidationError,
+    identify_image,
+    validate_image,
+)
 
 if TYPE_CHECKING:
     from pricepilot.rate_limit import RateLimiter
@@ -40,6 +46,18 @@ def _rate_limiter(request: Request) -> RateLimiter:
 
 
 def _client_key(request: Request) -> str:
+    """Rate-limit identity key.
+
+    Prefer the caller's canonical identity (X-User-Id when it is a valid UUID)
+    so a user cannot trivially bypass limits by rotating IPs/proxies; fall back
+    to the client IP otherwise (e.g. anonymous /public endpoints).
+    """
+    header = request.headers.get("x-user-id")
+    if header:
+        try:
+            return f"identity:{str(uuid.UUID(header.strip()))}"
+        except (ValueError, AttributeError):
+            pass
     return request.client.host if request.client else "unknown"
 
 
@@ -123,13 +141,27 @@ async def shopping_chat(request: Request, body: ChatQuery) -> JSONResponse:
 
     request_id = request.scope.get("request_id") or "req-unknown"
     from pricepilot.services.chat import run_chat
+    from pricepilot.services.identity import resolve_user_identity
+
+    # Bind the conversation to a resolved identity when X-User-Id is present;
+    # a client-supplied session_id is only honored for its owner.
+    async with SessionLocal() as session:
+        uid = None
+        header = _user_id(request)
+        if header:
+            uid = await resolve_user_identity(session, header)
 
     result = await run_chat(
         request_id=request_id,
         query=body.query,
         session_id=body.session_id,
-        user_id=None,
+        user_id=uid,
     )
+    if result.get("status") == "not_found":
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not_found", "message": "Chat session not found or not owned by this user.", "details": None}},
+        )
     resp = ShoppingSearchResponse(
         request_id=request_id,
         query=body.query,
@@ -173,8 +205,12 @@ async def shopping_image(
     if not allowed:
         raise RateLimitExceededError()
 
-    content = await file.read()
     mime = (file.content_type or "").lower()
+    # Read only up to the size cap (+1) so an oversized upload is rejected
+    # without buffering unbounded bytes into memory.
+    content = await file.read(MAX_BYTES + 1)
+    if len(content) > MAX_BYTES:
+        return _validation_error(f"Image exceeds the {MAX_BYTES // (1024 * 1024)} MB limit.")
     try:
         validate_image(mime, len(content), content)
     except ImageValidationError as exc:

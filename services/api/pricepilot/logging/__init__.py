@@ -44,13 +44,22 @@ def _configure() -> None:
 _configure()
 
 
+_configured_children: set[str] = set()
+
+
 def get_logger(name: str) -> logging.Logger:
     """Return a logger namespaced under `pricepilot`.
 
-    Explicitly force-disables propagation on the returned logger too, because a
-    bare child logger of a non-propagating root would otherwise emit nothing.
+    Each child gets its own StreamHandler with the JSON formatter, because the
+    `pricepilot` root is non-propagating and a bare child would otherwise emit
+    nothing. Handlers are added once per logger name.
     """
     log = logging.getLogger(f"pricepilot.{name}")
     log.setLevel(settings.log_level.upper())
     log.propagate = False
+    if name not in _configured_children:
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonFormatter())
+        log.addHandler(handler)
+        _configured_children.add(name)
     return log

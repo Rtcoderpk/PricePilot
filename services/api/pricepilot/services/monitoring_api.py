@@ -29,33 +29,46 @@ async def create_tracking(
     alert_preferences: dict[str, bool] | None,
 ) -> dict[str, Any]:
     """Track a product for this user; returns the new watchlist row or an
-    existing-row notice on duplicate (duplicate prevention)."""
-    # duplicate prevention: unique (user_id, product_id)
+    existing-row notice on duplicate. Idempotent under concurrency: the unique
+    (user_id, product_id) constraint plus `ON CONFLICT DO NOTHING` removes the
+    SELECT→INSERT race (no more duplicate 500s)."""
+    wl_id = str(uuid.uuid4())
+    prefs = alert_preferences or {"price_drop": True, "new_low": True, "target_price": True}
+    try:
+        inserted = await session.execute(
+            text(
+                "INSERT INTO watchlists (id, user_id, product_id, target_price, target_currency, "
+                "alert_preferences, paused, created_at, updated_at) "
+                "VALUES (:id, :uid, :pid, :target, :curr, CAST(:prefs AS jsonb), false, now(), now()) "
+                "ON CONFLICT (user_id, product_id) DO NOTHING RETURNING id"
+            ),
+            {
+                "id": wl_id,
+                "uid": user_id,
+                "pid": product_id,
+                "target": target_price,
+                "curr": target_currency or "USD",
+                "prefs": _json_str(prefs),
+            },
+        )
+    except Exception:
+        await session.rollback()
+        log.exception("tracking: create failed for user %s product %s", user_id, product_id)
+        raise
+
+    row = inserted.mappings().first()
+    if row is not None:
+        await session.commit()
+        return {"status": "created", "id": str(row["id"]), **prefs}
+
+    # Conflict → the row already exists; return the existing one.
     existing = (await session.execute(
         text("SELECT id FROM watchlists WHERE user_id=:uid AND product_id=:pid"),
         {"uid": user_id, "pid": product_id},
-    )).mappings().all()
+    )).mappings().first()
+    await session.rollback()  # release the aborted insert's transaction state
     if existing:
-        return {"status": "already_tracked", "id": str(existing[0]["id"])}
-
-    wl_id = str(uuid.uuid4())
-    prefs = alert_preferences or {"price_drop": True, "new_low": True, "target_price": True}
-    await session.execute(
-        text(
-            "INSERT INTO watchlists (id, user_id, product_id, target_price, target_currency, "
-            "alert_preferences, paused, created_at, updated_at) "
-            "VALUES (:id, :uid, :pid, :target, :curr, CAST(:prefs AS jsonb), false, now(), now())"
-        ),
-        {
-            "id": wl_id,
-            "uid": user_id,
-            "pid": product_id,
-            "target": target_price,
-            "curr": target_currency or "USD",
-            "prefs": _json_str(prefs),
-        },
-    )
-    await session.commit()
+        return {"status": "already_tracked", "id": str(existing["id"])}
     return {"status": "created", "id": wl_id, **prefs}
 
 

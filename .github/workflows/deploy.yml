@@ -11,6 +11,11 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege: these jobs only need to read the repo and use delegated
+# platform credentials via secrets. No write tokens are requested.
+permissions:
+  contents: read
+
 env:
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
 

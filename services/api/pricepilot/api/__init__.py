@@ -29,6 +29,11 @@ log = get_logger("api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail fast on unsafe production config before serving traffic.
+    from pricepilot.config.settings_prod_guard import assert_production_config_safe
+
+    assert_production_config_safe(app_env=settings.app_env, jwt_secret=settings.jwt_secret)
+
     # --- startup ---
     redis = None
     try:

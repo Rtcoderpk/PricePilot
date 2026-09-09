@@ -20,6 +20,8 @@ so we never re-write the same unchanged price repeatedly; alerts are deduped by
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import signal
 import time
 
 from sqlalchemy import text
@@ -79,15 +81,32 @@ async def _process_one(session, source: PriceSource, entry: dict) -> dict:
     """
     wl_id = entry["watchlist_id"]
     user_id = entry["user_id"]
-    product_id = entry["product_id"]
     barcode = entry.get("barcode")
     offer_id = entry.get("offer_id")
-    target_price = float(entry["target_price"]) if entry.get("target_price") is not None else None
 
     if not barcode or not offer_id or not user_id:
         return {"watchlist_id": wl_id, "status": "skipped", "reason": "no offer/user/barcode"}
 
-    result = await _fetch_with_retry(source, barcode)
+    # Bound the whole per-entry operation so a stuck provider/poll can never
+    # hang the worker beyond a fixed budget (provider timeout + retries + margin).
+    entry_budget = max(
+        settings.monitor_provider_timeout_seconds,
+        settings.monitor_provider_timeout_seconds * (settings.monitor_retry_count + 1) + 10,
+    )
+    try:
+        return await asyncio.wait_for(_poll_entry(session, source, entry, wl_id), timeout=entry_budget)
+    except TimeoutError:
+        log.warning("worker: entry %s exceeded timeout budget", wl_id)
+        return {"watchlist_id": wl_id, "status": "timeout"}
+
+
+async def _poll_entry(session, source: PriceSource, entry: dict, wl_id: str) -> dict:
+    user_id = entry["user_id"]
+    product_id = entry["product_id"]
+    offer_id = entry.get("offer_id")
+    target_price = float(entry["target_price"]) if entry.get("target_price") is not None else None
+
+    result = await _fetch_with_retry(source, entry["barcode"])
     if result.status == "provider_failed":
         return {"watchlist_id": wl_id, "status": "provider_failed"}
 
@@ -168,15 +187,35 @@ async def pump() -> None:
 
 async def main() -> None:
     await pump()
+
+    stopping = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def _request_stop() -> None:
+        """Graceful shutdown on SIGTERM/SIGINT: finish the current cycle, then exit."""
+        log.info("worker: shutdown signal received; finishing current cycle")
+        stopping.set()
+
+    for sig in ("SIGTERM", "SIGINT"):
+        try:
+            loop.add_signal_handler(getattr(signal, sig), _request_stop)
+        except (NotImplementedError, RuntimeError, AttributeError):
+            # Windows/limited environments may not support signal handlers.
+            log.warning("worker: signal handler for %s unavailable", sig)
+
     interval = max(30, settings.monitor_poll_interval_seconds)
-    while True:
+    while not stopping.is_set():
         started = time.monotonic()
         try:
             summary = await run_monitoring_cycle()
             log.info("monitoring cycle: %s (elapsed %.1fs)", summary.get("status"), time.monotonic() - started)
         except Exception:
             log.exception("worker: cycle raised (kept alive)")
-        await asyncio.sleep(interval)
+        # Await interruptible sleep so a shutdown signal wakes us promptly.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=interval)
+
+    log.info("worker: shutdown complete")
 
 
 if __name__ == "__main__":
