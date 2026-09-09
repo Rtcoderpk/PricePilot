@@ -1,0 +1,67 @@
+# Render blueprint — PricePilot production deployment (controlled/private).
+#
+# Two persistent services from the SAME Docker image (services/api/Dockerfile):
+#   `api`     → FastAPI (uvicorn, 1 async worker — appropriate for this app)
+#   `worker`  → long-running price-monitoring loop
+#
+# These are persistent services — NOT serverless. Supabase provides the managed
+# Postgres (pgvector + citext) and a managed Redis is supplied via Redislabs /
+# Upstash / Render's own Redis. Set all env values in the Render dashboard.
+#
+# Apply with:  render blueprint sync  (or the Render Dashboard → Blueprint)
+
+services:
+  - type: web
+    name: pricepilot-api
+    runtime: docker
+    repo: https://github.com/YOUR_ORG/PricePilot
+    dockerContext: .
+    dockerfilePath: ./services/api/Dockerfile
+    plan: starter # free or starter; horizontal scaling optional
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        sync: false # set in dashboard (Supabase DSN, includes SSLMODE=require)
+      - key: REDIS_URL
+        sync: false # managed Redis DSN (auth + TLS as provider requires)
+      - key: JWT_SECRET
+        sync: false # strong random secret (required in production)
+      - key: CORS_ORIGIN
+        sync: false # e.g. https://app.yourdomain.com
+      - key: PRICEPILOT_SEARCH_PROVIDER
+        value: openfoodfacts
+      - key: OFF_API_BASE_URL
+        value: https://world.openfoodfacts.org
+      - key: AI_PROVIDER
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: MONITOR_ENABLED
+        value: "true"
+
+  - type: worker
+    name: pricepilot-worker
+    runtime: docker
+    repo: https://github.com/YOUR_ORG/PricePilot
+    dockerContext: .
+    dockerfilePath: ./services/worker/Dockerfile
+    plan: starter # long-running process must not be serverless
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: PRICEPILOT_SEARCH_PROVIDER
+        value: openfoodfacts
+      - key: MONITOR_ENABLED
+        value: "true"
+      - key: MONITOR_POLL_INTERVAL_SECONDS
+        value: "3600"

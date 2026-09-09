@@ -32,6 +32,9 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://pricepilot:pricepilot@localhost:5432/pricepilot"
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
+    db_pool_size: int = Field(default=5, ge=1, le=50)
+    db_max_overflow: int = Field(default=10, ge=0, le=50)
+    db_pool_recycle: int = Field(default=1800, ge=60)
     jwt_secret: str = Field(default="change-me-in-prod")
     pricepilot_public_base_url: str = Field(default="http://localhost:8000")
     cors_origin: str = Field(default="http://localhost:3000")

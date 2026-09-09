@@ -24,4 +24,6 @@ USER app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "pricepilot.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Production default: apply Alembic migrations, then start uvicorn.
+# A platform override may supply a migration-free `uvicorn` start command.
+CMD ["sh", "/srv/services/api/prod.sh"]

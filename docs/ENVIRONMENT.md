@@ -19,11 +19,14 @@ the port mappings shown).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | local asyncpg DSN | used for app + readiness; Alembic auto-converts to sync psycopg |
-| `REDIS_URL` | `redis://localhost:6379/0` | cache + rate limiting |
+| `DATABASE_URL` | local asyncpg DSN | used for app + readiness; Alembic auto-converts to sync psycopg. Production: Supabase DSN with `sslmode=require`. |
+| `REDIS_URL` | `redis://localhost:6379/0` | cache + rate limiting. Production: managed Redis DSN (auth + TLS per provider). |
+| `DB_POOL_SIZE` | `5` | SQLAlchemy async pool size — match managed Postgres connection limits |
+| `DB_MAX_OVERFLOW` | `10` | max overflow connections above pool size |
+| `DB_POOL_RECYCLE` | `1800` | connection recycle seconds |
 | `PRICEPILOT_PUBLIC_BASE_URL` | `http://localhost:8000` | seen in docs/health |
-| `CORS_ORIGIN` | `http://localhost:3000` | web origin allowed by CORS |
-| `JWT_SECRET` | placeholder | auth is deferred, placeholder only |
+| `CORS_ORIGIN` | `http://localhost:3000` | exact web origin allowed by CORS — set to the HTTPS frontend origin in production (no wildcard) |
+| `JWT_SECRET` | placeholder | **required strong random value in production** — the app refuses to start with the placeholder (Phase 7 guard). Auth remains deferred via `X-User-Id`. |
 
 ## Search providers
 

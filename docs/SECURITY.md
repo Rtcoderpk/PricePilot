@@ -1,6 +1,6 @@
 # PricePilot — Security
 
-> This documents the security posture as of Phase 1. Anything marked *planned*
+> This documents the security posture as of Phase 8. Anything marked *planned*
 > is not yet enforced and is a known gap, not a claim.
 
 ## Current (Phase 1)
@@ -42,6 +42,23 @@ cd apps/web && npm audit --audit-level=high
 # Secret scan
 # gitleaks (or CI)
 ```
+
+## Production authentication limitation
+
+> **CONTROLLED / PRIVATE deployment only.** Current identity is deferred auth:
+> an `X-User-Id` UUID header that idempotently creates a `users` row on first
+> use. Any caller can claim any UUID — there is **no verified account
+> ownership**, no recovery, and no per-user authentication.
+
+Consequences:
+- App-level ownership checks still prevent cross-user data access (tracking,
+  alerts, preferences, chat sessions are user-scoped).
+- Identity itself is unauthenticated, so this is **not production-grade
+  authentication** and must not be presented as such.
+
+Before a **public multi-user launch**: implement real authentication (Supabase
+Auth / JWT), replace the identity resolver with a JWT-verified user UUID, and
+activate RLS policies (already migration-ready in migration `0007`).
 
 ## Reporting
 

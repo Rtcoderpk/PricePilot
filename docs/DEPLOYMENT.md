@@ -1,82 +1,115 @@
 # PricePilot — DEPLOYMENT
 
-**Version:** 0.1 (Phase 0 planning baseline) · **Date:** 2026-09-08
+**Status:** Phase 8 — production deployment readiness · **Date:** 2026-09-09
 
-## 1. Target topology
+## 1. Target topology (approved architecture)
 
 | Component | Target | Notes |
 |---|---|---|
-| Web (Next.js App Router) | **Vercel** | static/server-rendered surface; no long-running AI/scrape in functions |
-| API (FastAPI) | **Dockerized service** | long-running agent work; deployed on a container platform (Render/Fly/Railway or your exact target) |
-| Worker | **Dockerized service** | Redis-backed job consumption, price polling, alerts |
-| Redis | Managed or container | cache, job broker, rate limiting |
-| Postgres + pgvector | **Supabase** (prod) / local container (dev) | migrations via `services/db` |
+| Web (Next.js 16, App Router) | **Vercel** | stateless API client; no DB/Redis on functions |
+| API (FastAPI) | **Render** (Docker web service) | long-running async service; single uvicorn worker |
+| Worker | **Render** (Docker worker service) | persistent price-monitoring loop (NOT serverless) |
+| Redis | Managed (Upstash / Render Redis / Redislabs) | cache + rate limiting; fail-open on outage |
+| PostgreSQL + pgvector | **Supabase** (prod) / local container (dev) | migrations via `services/db` |
 
-API and worker may start on the same image with a different entrypoint (`api` vs `worker`).
+API and worker share the **same Docker image** (`services/api/Dockerfile`) with a
+different startup command:
+- API → `services/api/prod.sh` (applies Alembic migrations, then `uvicorn`)
+- Worker → `services/worker/run.sh` (`python -m main`, persistent loop)
 
-## 2. Environment matrix
+## 2. Production posture
 
-**Always injected as env vars, never committed.** `.env.example` documents every key with safe defaults; `.env*` git-ignored.
+> **CONTROLLED / PRIVATE deployment.** Identity today is deferred auth via an
+> `X-User-Id` UUID header that idempotently creates a user row on first use —
+> this is **NOT production authentication.** Anyone can claim any UUID.
+> A public multi-user launch is blocked until real authentication (Supabase
+> Auth, recommended) is implemented and the identity resolver is replaced.
+> See `docs/SECURITY.md` and §9 below.
 
-### Shared
-- `LOG_LEVEL`, `APP_ENV=development|test|production`, `PRICEPILOT_ENABLE_FIXTURES=false`
+## 3. Environment variables
+
+**Always injected as env vars, never committed.** `.env.example` is the source
+of truth for names; `.env*` is git-ignored. In production set these as platform
+secrets on Render, and `NEXT_PUBLIC_*` on Vercel.
+
+### Shared (API + worker)
+- `APP_ENV=production`, `LOG_LEVEL=INFO`, `PRICEPILOT_ENABLE_FIXTURES=false`
+- `DATABASE_URL` — Supabase DSN (asyncpg). **Includes SSL** (`sslmode=require`).
+- `REDIS_URL` — managed Redis DSN (auth + TLS per provider).
+- `DB_POOL_SIZE` (default 5), `DB_MAX_OVERFLOW` (10), `DB_POOL_RECYCLE` (1800)
+  — tune to the managed Postgres connection limit.
 
 ### API
-- `DATABASE_URL` (Postgres/pgvector DSN — Supabase in prod), `REDIS_URL`, `JWT_SECRET`, `PRICEPILOT_PUBLIC_BASE_URL`, `CORS_ORIGIN`
-- `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, `AI_BASE_URL`, `AI_TEMPERATURE`, `AI_MAX_TOKENS` (may be `openai-compatible` or `ollama`; no key = graceful unavailable)
-- Per-provider: `PROVIDER_<NAME>_API_KEY`, base URLs, rate limits
+- `JWT_SECRET` — **required strong random value**; the app refuses to start in
+  production with the placeholder (Phase 7 guard).
+- `PRICEPILOT_PUBLIC_BASE_URL`, `CORS_ORIGIN` (exact frontend origin, no wildcard)
+- AI providers (all optional): `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`,
+  `AI_BASE_URL`, `AI_TEMPERATURE`, `AI_MAX_TOKENS`, `AI_EMBEDDING_MODEL`
+- Invite providers: `PRICEPILOT_EMBEDDING_PROVIDER`, `PRICEPILOT_VISION_PROVIDER`,
+  `PRICEPILOT_REVIEW_PROVIDER` (empty = honest unavailable)
+- Search: `PRICEPILOT_SEARCH_PROVIDER=openfoodfacts`, `OFF_API_BASE_URL`,
+  `OFF_TIMEOUT_SECONDS`, `OFF_MAX_PAGE_SIZE`
+- Notifications (optional): `PRICEPILOT_NOTIFICATION_PROVIDER`, `SMTP_HOST`,
+  `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER`
 
-### Worker
-- `DATABASE_URL`, `REDIS_URL`, `ALERT_SWEEP_INTERVAL_SECONDS`, `PRICE_POLL_INTERVAL_SECONDS`, `MAX_ALERTS_PER_SWEEP`
+### Worker / monitoring
+- `MONITOR_ENABLED`, `MONITOR_POLL_INTERVAL_SECONDS`, `MONITOR_PROVIDER_TIMEOUT_SECONDS`,
+  `MONITOR_MAX_CONCURRENCY`, `MONITOR_RETRY_COUNT`, `MONITOR_OBSERVATION_WINDOW_SECONDS`
 
-### Web
-- `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (public-role only — no secrets)
+### Web (Vercel)
+- `NEXT_PUBLIC_API_BASE_URL` — HTTPS API origin (browser-visible, never a secret)
 
-## 3. Local development
+## 4. Local development
 
-`docker-compose.yml`:
-- `db` (postgres:16 + pgvector), `redis`, `api` (uvicorn, reload), `worker` (dev loop), and the web via `pnpm dev`/`npm run dev` locally on the host.
-- `services/db` runs migrations on first `api` start.
+`docker-compose.yml` runs `db` (pgvector:pg16), `redis`, `api` (uvicorn +
+migrations on start), and `worker`. Web runs on the host via `npm run dev`.
+Postgres/Redis host ports are bound to `127.0.0.1`.
 
-## 4. CI/CD (GitHub Actions)
+## 5. CI/CD (GitHub Actions)
 
-Pipeline (`.github/workflows/ci.yml` + `deploy.yml`):
-1. **ci**: install → lint → typecheck → unit tests → integration tests → build → security checks (`pip-audit`, `npm audit`, secret scan, basic dep/MV sanity) → fail on any critical.
-2. **deploy**: on merge to `main` / tag → Vercel web (via `vercel` CLI or GitHub integration), API+worker images built & pushed, migrations applied before rollout, then rolling updates.
+- **CI (`.github/workflows/ci.yml`)** — on PRs and `main` push: ruff, migrations
+  (up → down → up), full pytest against service Postgres+Redis, web lint/
+  typecheck/test/build, security (pip-audit, npm audit, gitleaks), Docker build.
+  Least-privilege `permissions: contents: read`.
+- **Deploy (`.github/workflows/deploy.yml`)** — on `main` push: Vercel production
+  deploy (web) and Render deploy trigger (API + worker). Render watches the repo
+  branch natively; the API image runs `prod.sh` which applies Alembic migrations
+  at startup (guarded, idempotent). A smoke gate validates production URLs.
 
-**No deploy when critical checks fail.** Secrets passed as GitHub Secrets (or OIDC).
+**No deploy when CI fails.** Secrets are GitHub Secrets / platform env only.
 
-## 5. Production runbooks
+## 6. Production migration procedure
 
-### Migrations
-- Apply before new worker/api versions take live traffic (Supabase `db push` or configured runner). Down-scripts provided; tag compatibility so web/API/worker stay on one schema.
+1. Backup the production database (provider snapshot / pg_dump).
+2. Verify DB connectivity (`/readyz` or a manual `SELECT 1`).
+3. Run `alembic upgrade head` (the API image's `prod.sh` does this at startup).
+4. Verify migration head is `0009`.
+5. Verify extensions `citext` and `vector` exist.
+6. Start the API; confirm `/health` then `/readyz` are green.
+7. Start the worker; confirm it logs a monitoring cycle.
 
-### Rollbacks
-- Web: Vercel instant rollback / reuse prior preview.
-- API: redeploy previous image (DB-compatible), watch `agent_runs` error rate.
-- Worker: scale-in before API rollback to avoid alert storms.
+No destructive migration runs automatically.
 
-### Alerts & observability
-- Health: `/healthz` (API, worker, redis ping, db ping) + `/readyz` (migrations applied, schema version).
-- Metrics: request latency, provider latency/failures, queue depth, cache hit-rate, DB slow-queries.
-- Logs: structured JSON with `request_id`; never secrets. Deploy-time dashboards in target monitor.
+## 7. Rollback
 
-## 6. Serverless boundary (must hold)
+- Web: redeploy the previous known-good commit on Vercel.
+- API/Worker: redeploy the previous image/release (Render keeps prior deploys).
+- Database migration: roll forward preferred; only `downgrade` if the new schema
+  is broken AND data-compatible; otherwise restore from backup first.
+- Redis: cache/rate-limit only — flush is safe (fail-open covers outage).
 
-- Vercel functions only serve read-heavy UI fast-paths (e.g., cached product pages).
-- Any multi-agent run, provider crawl, or review analysis executes in **API/worker**.
-- CI adds a guard so a "long-running" route does not silently end up in a serverless handler.
+## 8. Observability
 
-## 7. Performance & scaling
+- Health: `GET /health` (liveness) and `GET /readyz` (DB required, Redis
+  degradable) on the API.
+- Logs: structured JSON with `request_id`; **secrets are never logged.**
+- Worker: logs each cycle; a failure for one tracked offer never aborts the loop.
 
-- Reads scale horizontally on the API with cached product pages + price snapshots from workers.
-- Writes bottlenecked by provider rate limits and Redis queue depth — adequate for the demo/portfolio scale with per-provider throttling.
-- pgvector HNSW index handles semantic search at catalog scale; if insert throughput explodes, reindex in worker off-peak.
+## 9. Authentication limitation (blocking public launch)
 
-## 8. Open items before Phase 1 deploy
-
-1. Pin Python base image (3.11-slim) and Node (24) in Dockerfiles/CI.
-2. Decide exact container platform for API/worker (Render/Railway/Fly or your preference) — needed before writing `deploy.yml` fully.
-3. Supabase project to provision (env pull via Vercel Marketplace).
-4. Redis managed URI to provision.
-5. Verify `PRICEPILOT_ENABLE_FIXTURES` is `false` in every prod workflow (guard in CI).
+- Identity = `X-User-Id` UUID (deferred auth). Valid UUIDs auto-create a user row.
+- This is safe for a **controlled/private/demo** deployment (invite-only testers).
+- It is **not** production-grade: no verified account ownership, no recovery, no
+  real per-user auth. **Supabase Auth (JWT) is a prerequisite before broad
+  public multi-user launch**, at which point the identity resolver is replaced and
+  RLS (already migration-ready in 0007) takes effect.

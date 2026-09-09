@@ -30,6 +30,13 @@ class Base(DeclarativeBase):
 # loop, and a shared queued pool would recycle connections across loops
 # (asyncpg "Event loop is closed" cascade on both Windows and CI). NullPool
 # closes a connection as soon as the session ends, so nothing outlives its loop.
+#
+# Production pool size is configurable via env vars so deployments can match a
+# provider's connection limit (e.g. Supabase free/micro tiers cap connections).
+pool_size = settings.db_pool_size  # default 5
+max_overflow = settings.db_max_overflow  # default 10
+pool_recycle = settings.db_pool_recycle  # default 1800
+
 _engine_kwargs: dict = {
     "pool_pre_ping": True,
     "echo": False,
@@ -37,7 +44,9 @@ _engine_kwargs: dict = {
 if settings.app_env == "test":
     _engine_kwargs["poolclass"] = NullPool
 else:
-    _engine_kwargs.update(pool_size=5, max_overflow=10, pool_recycle=1800)
+    _engine_kwargs.update(
+        pool_size=pool_size, max_overflow=max_overflow, pool_recycle=pool_recycle
+    )
 
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
 

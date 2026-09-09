@@ -4,9 +4,12 @@ Tell PricePilot what you want to buy; it researches products, compares stores,
 analyzes prices and reviews, evaluates sellers, and returns an **explainable**
 recommendation.
 
-> **Status: Phase 1 (foundation).** Live search works against the real
-> OpenFoodFacts public API. AI agents, price tracking, and advanced features are
-> in later phases (see roadmap below). No data is ever fabricated; unavailable
+> **Status: Phase 8 (production deployment readiness).** Live search against the
+> real OpenFoodFacts API, AI shopping agent, price monitoring/tracking/alerts,
+> premium UI, and security hardening are all complete and verified. This
+> deployment is **controlled/private** — identity is a deferred-auth `X-User-Id`
+> UUID, NOT production authentication. Real user authentication is required
+> before a public multi-user launch. No data is ever fabricated; unavailable
 > providers are reported as unavailable.
 
 ---
@@ -85,12 +88,14 @@ docs/             architecture, database, agents, deployment, API, env
 | 2 | Product intelligence (normalization, matching, dedup, multi-provider) | done |
 | 3 | AI agents (intent → recommendation) | done |
 | 4 | Advanced AI (SIBT, chat, voice, image, reviews, semantic, forecast) | done |
-| 3 | AI agents (intent → recommendation) | planned |
-| 4 | SIBT, chat, image/voice, review intelligence | planned |
-| 5 | Price monitoring, alerts, worker jobs | planned |
-| 6 | Premium UI (dashboard, compare, track, alerts) | planned |
+| 5 | Price monitoring, alerts, worker jobs | done |
+| 6 | Premium UI (dashboard, compare, track, alerts) | done |
+| 7 | Security, testing, production hardening | done |
+| 8 | Production deployment & launch readiness | done (controlled/private) |
+| 9 | Real authentication (Supabase Auth), public launch | planned |
 
-See `docs/` for detail. **No feature is documented as done until it exists.**
+See `docs/` for detail (especially `docs/DEPLOYMENT.md`, `docs/ENVIRONMENT.md`).
+**No feature is documented as done until it exists.**
 
 ## Configuration
 

@@ -9,10 +9,6 @@ const nextConfig = {
       { protocol: "https", hostname: "world.openfoodfacts.org" },
     ],
   },
-  experimental: {
-    // Keep long-running agent/AI work off serverless boundaries.
-    serverActions: { allowedOrigins: ["localhost:3000"] },
-  },
 };
 
 module.exports = nextConfig;
