@@ -37,11 +37,13 @@ services:
       - key: OFF_API_BASE_URL
         value: https://world.openfoodfacts.org
       - key: AI_PROVIDER
-        sync: false
+        value: openai-compatible
       - key: AI_MODEL
         sync: false
       - key: AI_API_KEY
         sync: false
+      - key: AI_BASE_URL
+        value: https://agentrouter.org/v1
       - key: PRICEPILOT_NOTIFICATION_PROVIDER
         sync: false
       - key: SMTP_HOST
