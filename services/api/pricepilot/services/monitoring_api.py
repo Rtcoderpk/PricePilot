@@ -7,6 +7,7 @@ later reinforced by RLS when Supabase roles are present). Never fabricates data.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -34,6 +35,13 @@ async def create_tracking(
     SELECT→INSERT race (no more duplicate 500s)."""
     wl_id = str(uuid.uuid4())
     prefs = alert_preferences or {"price_drop": True, "new_low": True, "target_price": True}
+
+    # The search surface returns canonical ids like `pp_gtin_<hex>` rather than a
+    # `products` UUID. To make "track a search result" work end-to-end, persist a
+    # products.row (+ a sku identifier) for a canonical id on first use so the
+    # watchlist FK is satisfied and the monitoring worker can later match it.
+    resolved_product_id = await _ensure_product_for_tracking(session, product_id)
+
     try:
         inserted = await session.execute(
             text(
@@ -45,7 +53,7 @@ async def create_tracking(
             {
                 "id": wl_id,
                 "uid": user_id,
-                "pid": product_id,
+                "pid": resolved_product_id,
                 "target": target_price,
                 "curr": target_currency or "USD",
                 "prefs": _json_str(prefs),
@@ -64,12 +72,73 @@ async def create_tracking(
     # Conflict → the row already exists; return the existing one.
     existing = (await session.execute(
         text("SELECT id FROM watchlists WHERE user_id=:uid AND product_id=:pid"),
-        {"uid": user_id, "pid": product_id},
+        {"uid": user_id, "pid": resolved_product_id},
     )).mappings().first()
     await session.rollback()  # release the aborted insert's transaction state
     if existing:
         return {"status": "already_tracked", "id": str(existing["id"])}
     return {"status": "created", "id": wl_id, **prefs}
+
+
+async def _ensure_product_for_tracking(session, product_id: str) -> str:
+    """Resolve a `product_id` to a real `products.id` UUID, persisting a row
+    when a canonical id (e.g. `pp_gtin_<hex>` / `off_...`) is provided.
+
+    Returns the UUID to use for the watchlist FK. Idempotent: looks up an
+    existing product by its canonical id (stored as a `sku` identifier) before
+    inserting.
+    """
+    if not product_id:
+        return product_id
+
+    # Already a UUID-shaped id → use it directly (caller is responsible for it
+    # existing; the FK will reject a dangling id, which is correct).
+    try:
+        as_uuid = str(uuid.UUID(product_id.strip()))
+        if as_uuid == product_id.strip():
+            return as_uuid
+    except (ValueError, AttributeError):
+        pass
+
+    canonical = product_id.strip()
+    # Idempotent lookup by canonical id (stored as an `sku` identifier).
+    existing = (await session.execute(
+        text(
+            "SELECT p.id FROM products p "
+            "JOIN product_identifiers pi ON pi.product_id = p.id "
+            "WHERE pi.id_type = 'sku' AND pi.id_value = :canonical "
+            "LIMIT 1"
+        ),
+        {"canonical": canonical},
+    )).mappings().first()
+    if existing:
+        return str(existing["id"])
+
+    pid = str(uuid.uuid4())
+    name = canonical if canonical.startswith("pp_") or canonical.startswith("off_") else canonical
+    try:
+        await session.execute(
+            text(
+                "INSERT INTO products (id, canonical_name, brand, meta, is_fixture, created_at, updated_at) "
+                "VALUES (:id, :name, NULL, :meta, false, now(), now())"
+            ),
+            {"id": pid, "name": name[:300], "meta": json.dumps({"canonical_id": canonical})},
+        )
+        await session.execute(
+            text(
+                "INSERT INTO product_identifiers (id, product_id, id_type, id_value, source, created_at, updated_at) "
+                "VALUES (:iid, :pid, 'sku', :value, 'canonical', now(), now()) "
+                "ON CONFLICT (id_type, id_value) DO NOTHING"
+            ),
+            {"iid": str(uuid.uuid4()), "pid": pid, "value": canonical},
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        log.exception("tracking: product persist failed for canonical %s", canonical)
+        # Re-raise so the caller surfaces a controlled error (not a silent pass).
+        raise
+    return pid
 
 
 async def list_tracking(session, *, user_id: str) -> list[dict[str, Any]]:

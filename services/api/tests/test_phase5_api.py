@@ -87,6 +87,49 @@ def test_tracking_create_list_delete(client):
         _cleanup(pid)
 
 
+def test_tracking_canonical_id_persists_product(client):
+    """Tracking a canonical `pp_...` search id persists a products row, so the
+    watchlist FK is satisfied and the worker can poll it (end-to-end)."""
+    import asyncio
+
+    from pricepilot.db import SessionLocal
+
+    canonical = "pp_gtin_05781d7959874910"
+    user = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+
+    async def _drop():
+        async with SessionLocal() as s:
+            from sqlalchemy import text
+
+            await s.execute(text("DELETE FROM watchlists WHERE user_id = :u"), {"u": user})
+            await s.execute(
+                text("DELETE FROM product_identifiers WHERE id_value = :c"), {"c": canonical}
+            )
+            await s.execute(
+                text("DELETE FROM products WHERE id NOT IN (SELECT product_id FROM watchlists) "
+                     "AND id IN (SELECT product_id FROM product_identifiers WHERE id_value = :c)"),
+                {"c": canonical},
+            )
+            await s.execute(text("DELETE FROM users WHERE id = :u"), {"u": user})
+            await s.commit()
+
+    try:
+        r = client.post(
+            "/api/v1/tracking",
+            json={"product_id": canonical, "target_price": 10.0},
+            headers={"X-User-Id": user},
+        )
+        assert r.status_code in (200, 201), r.text
+        # The watchlist references a real products.id now (FK satisfied).
+        listing = client.get("/api/v1/tracking", headers={"X-User-Id": user}).json()
+        assert any(
+            t.get("product_id") != canonical and len(t.get("product_id", "")) == 36
+            for t in listing
+        ), listing
+    finally:
+        asyncio.run(_drop())
+
+
 def test_tracking_requires_user(client):
     r = client.post("/api/v1/tracking", json={"product_id": "x"})
     assert r.status_code == 401
