@@ -1,37 +1,37 @@
 # Render blueprint — PricePilot production deployment (controlled/private).
 #
-# Two persistent services from the SAME Docker image (services/api/Dockerfile):
-#   `api`     → FastAPI (uvicorn, 1 async worker — appropriate for this app)
-#   `worker`  → long-running price-monitoring loop
+# Both services use the SAME root Dockerfile (builds API + worker + db). They
+# differ only by start command:
+#   `pricepilot-api`     → prod.sh (migrate + uvicorn), health check /health
+#   `pricepilot-worker`  → worker/run.sh (persistent monitoring loop)
 #
 # These are persistent services — NOT serverless. Supabase provides the managed
-# Postgres (pgvector + citext) and a managed Redis is supplied via Redislabs /
-# Upstash / Render's own Redis. Set all env values in the Render dashboard.
-#
-# Apply with:  render blueprint sync  (or the Render Dashboard → Blueprint)
+# Postgres (pgvector + citext) and a managed Redis is supplied via Upstash /
+# Render Redis. Set all env values in the Render dashboard (secrets marked
+# `sync: false` are entered in the Environment tab).
 
 services:
   - type: web
     name: pricepilot-api
     runtime: docker
-    repo: https://github.com/YOUR_ORG/PricePilot
-    dockerContext: .
-    dockerfilePath: ./services/api/Dockerfile
+    repo: https://github.com/Rtcoderpk/PricePilot
+    dockerfilePath: ./Dockerfile
     plan: starter # free or starter; horizontal scaling optional
     healthCheckPath: /health
+    dockerCommand: sh /srv/services/api/prod.sh
     envVars:
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL
         value: INFO
       - key: DATABASE_URL
-        sync: false # set in dashboard (Supabase DSN, includes SSLMODE=require)
+        sync: false # Supabase asyncpg DSN with ?sslmode=require
       - key: REDIS_URL
-        sync: false # managed Redis DSN (auth + TLS as provider requires)
+        sync: false # managed Redis DSN (rediss:// for TLS)
       - key: JWT_SECRET
         sync: false # strong random secret (required in production)
       - key: CORS_ORIGIN
-        sync: false # e.g. https://app.yourdomain.com
+        sync: false # exact frontend origin (no wildcard)
       - key: PRICEPILOT_SEARCH_PROVIDER
         value: openfoodfacts
       - key: OFF_API_BASE_URL
@@ -42,16 +42,26 @@ services:
         sync: false
       - key: AI_API_KEY
         sync: false
-      - key: MONITOR_ENABLED
-        value: "true"
+      - key: PRICEPILOT_NOTIFICATION_PROVIDER
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_SENDER
+        sync: false
 
   - type: worker
     name: pricepilot-worker
     runtime: docker
-    repo: https://github.com/YOUR_ORG/PricePilot
-    dockerContext: .
-    dockerfilePath: ./services/worker/Dockerfile
+    repo: https://github.com/Rtcoderpk/PricePilot
+    dockerfilePath: ./Dockerfile
     plan: starter # long-running process must not be serverless
+    dockerCommand: sh /srv/services/worker/run.sh
     envVars:
       - key: APP_ENV
         value: production
