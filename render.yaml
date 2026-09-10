@@ -39,11 +39,11 @@ services:
       - key: AI_PROVIDER
         value: openai-compatible
       - key: AI_MODEL
-        sync: false
+        value: gemini-2.0-flash
       - key: AI_API_KEY
         sync: false
       - key: AI_BASE_URL
-        value: https://agentrouter.org/v1
+        value: https://generativelanguage.googleapis.com/v1beta/openai
       - key: PRICEPILOT_NOTIFICATION_PROVIDER
         sync: false
       - key: SMTP_HOST
