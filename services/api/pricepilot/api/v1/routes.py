@@ -16,6 +16,8 @@ from pricepilot.models import (
     ChatQuery,
     MonitoringStatusResponse,
     PriceHistoryResponse,
+    ResearchRouteRequest,
+    ResearchTextRequest,
     SearchQuery,
     SearchResponse,
     ShoppingSearchQuery,
@@ -458,3 +460,112 @@ async def preferences_put(request: Request, body: UserPreferencesUpdate) -> JSON
         fields = body.model_dump(exclude_unset=True)
         result = await upsert_preferences(session, user_id=uid, fields=fields)
     return JSONResponse(content={"preferences": result})
+
+
+# --------------------------------------------------------------------------- #
+# Supplier research (text / voice / image)
+# --------------------------------------------------------------------------- #
+
+
+def _research_uid(request: Request) -> str | None:
+    """Best-effort identity for research (does not block anonymous use)."""
+    return _user_id(request)
+
+
+async def _research_identity(request: Request) -> str | None:
+    """Resolve X-User-Id → a real users.id so research_runs FK succeeds.
+
+    Anonymous (no header) is allowed → returns None. Invalid UUID → None.
+    """
+    raw = _user_id(request)
+    if not raw:
+        return None
+    try:
+        async with SessionLocal() as session:
+            from pricepilot.services.identity import resolve_user_identity
+
+            return await resolve_user_identity(session, raw)
+    except Exception:
+        log.exception("research identity resolution failed for %s", raw)
+        return None
+
+
+@router.post("/research/text")
+async def research_text(request: Request, body: ResearchTextRequest) -> JSONResponse:
+    limiter = _rate_limiter(request)
+    allowed, _ = await limiter.check_or_increment(
+        f"research:{_client_key(request)}", limit=15, window_seconds=60
+    )
+    if not allowed:
+        raise RateLimitExceededError()
+    request_id = request.scope.get("request_id") or "req-unknown"
+    from pricepilot.research.pipeline import run_text_research
+
+    redis = getattr(request.app.state, "redis", None)
+    result = await run_text_research(
+        request_id=request_id,
+        text=body.text,
+        user_id=await _research_identity(request),
+        use_gemini=body.use_gemini,
+        cache=redis,
+    )
+    return JSONResponse(content=result)
+
+
+@router.post("/research/route")
+async def research_route(request: Request, body: ResearchRouteRequest) -> JSONResponse:
+    limiter = _rate_limiter(request)
+    allowed, _ = await limiter.check_or_increment(
+        f"research:{_client_key(request)}", limit=15, window_seconds=60
+    )
+    if not allowed:
+        raise RateLimitExceededError()
+    request_id = request.scope.get("request_id") or "req-unknown"
+    from pricepilot.research.pipeline import run_text_research
+
+    redis = getattr(request.app.state, "redis", None)
+    result = await run_text_research(
+        request_id=request_id,
+        text=body.text,
+        user_id=await _research_identity(request),
+        use_gemini=body.use_gemini,
+        cache=redis,
+    )
+    # mark the input type (text/voice) on the envelope
+    result["input_type"] = body.input_type
+    return JSONResponse(content=result)
+
+
+@router.post("/research/image")
+async def research_image(
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    max_bytes: int = Form(default=5 * 1024 * 1024),  # noqa: B008
+) -> JSONResponse:
+    limiter = _rate_limiter(request)
+    allowed, _ = await limiter.check_or_increment(
+        f"research_image:{_client_key(request)}", limit=10, window_seconds=60
+    )
+    if not allowed:
+        raise RateLimitExceededError()
+    request_id = request.scope.get("request_id") or "req-unknown"
+
+    mime = (file.content_type or "").lower()
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        return JSONResponse(
+            status_code=413,
+            content={"error": {"code": "payload_too_large", "message": "Image exceeds the size limit.", "details": None}},
+        )
+
+    from pricepilot.research.pipeline import run_image_research
+
+    redis = getattr(request.app.state, "redis", None)
+    result = await run_image_research(
+        request_id=request_id,
+        image_bytes=content,
+        mime_type=mime,
+        user_id=await _research_identity(request),
+        cache=redis,
+    )
+    return JSONResponse(content=result)

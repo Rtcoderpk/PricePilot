@@ -265,3 +265,97 @@ export async function preferencesUpdate(
   });
   return parseResponse(res);
 }
+
+// ---- Supplier research (image / voice / text) ----
+
+export type ResearchSupplier = {
+  title: string;
+  supplier?: string | null;
+  product?: string | null;
+  price?: number | null;
+  currency?: string | null;
+  url?: string | null;
+  source: string;
+  image_url?: string | null;
+  moq?: number | null;
+  availability?: string | null;
+  shipping?: string | null;
+  rating?: number | null;
+  source_timestamp?: string | null;
+};
+
+export type ResearchVerification = {
+  result_index: number;
+  state: "verified" | "partially_verified" | "unverified";
+  checks: string[];
+  notes: string[];
+};
+
+export type ResearchComparisonOption = {
+  result_index: number;
+  supplier?: string | null;
+  product?: string | null;
+  unit_price?: number | null;
+  currency?: string | null;
+  moq?: number | null;
+  shipping?: string | null;
+  availability?: string | null;
+  verification: "verified" | "partially_verified" | "unverified";
+  source?: string | null;
+  url?: string | null;
+  is_cheapest?: boolean;
+  is_best_value?: boolean;
+  is_best_supplier?: boolean;
+};
+
+export type ResearchRecommendation = {
+  best_supplier?: ResearchComparisonOption | null;
+  cheapest_option?: ResearchComparisonOption | null;
+  best_value?: ResearchComparisonOption | null;
+  reasoning: string[];
+  confidence: number;
+  currency_conflict?: boolean;
+};
+
+export type ResearchResponse = {
+  request_id: string;
+  input_type?: string;
+  query?: Record<string, unknown> | null;
+  product_understanding?: Record<string, unknown> | null;
+  suppliers: ResearchSupplier[];
+  verifications: ResearchVerification[];
+  comparison: ResearchComparisonOption[];
+  recommendation: ResearchRecommendation | null;
+  currency_conflict?: boolean;
+  notice?: string | null;
+  extraction?: Record<string, unknown> | null;
+  response_text?: string;
+};
+
+export async function researchText(text: string): Promise<ResearchResponse> {
+  const res = await authFetch("/api/v1/research/text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, use_gemini: true }),
+  });
+  return parseResponse(res);
+}
+
+export async function researchRoute(text: string, inputType: "text" | "voice"): Promise<ResearchResponse> {
+  const res = await authFetch("/api/v1/research/route", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, input_type: inputType, use_gemini: true }),
+  });
+  return parseResponse(res);
+}
+
+export async function researchImage(file: File): Promise<ResearchResponse> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await authFetch("/api/v1/research/image", {
+    method: "POST",
+    body: form,
+  });
+  return parseResponse(res);
+}

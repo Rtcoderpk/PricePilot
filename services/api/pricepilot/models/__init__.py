@@ -278,3 +278,154 @@ class UserPreferencesUpdate(BaseModel):
     price_vs_quality: float | None = Field(default=None, ge=0, le=1)
     currency_code: str | None = Field(default=None, max_length=3)
     shopping_locale: str | None = Field(default=None, max_length=16)
+
+
+# --------------------------------------------------------------------------- #
+# Supplier research pipeline (Phase on top of the agent graph)
+# --------------------------------------------------------------------------- #
+
+
+class ProductImageExtraction(BaseModel):
+    """Structured product data extracted from an uploaded image (Gemini vision).
+
+    Fields that cannot be identified are null; the model is told never to invent
+    them. `search_terms` are the queries the search agent should run.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    category: str | None = None
+    product_name: str | None = None
+    brand: str | None = None
+    model: str | None = None
+    visible_model_number: str | None = None
+    sku: str | None = None
+    color: str | None = None
+    size: str | None = None
+    material: str | None = None
+    attributes: dict[str, str] = Field(default_factory=dict)
+    approximate_product_type: str | None = None
+    quantity: int | None = Field(default=None, ge=1)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    search_terms: list[str] = Field(default_factory=list)
+
+
+class ProductQuery(BaseModel):
+    """Normalized product understanding from any input mode (image/voice/text).
+
+    Used by the product-understanding agent. Only filled from real input or
+    real extraction — never invented.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: str | None = None
+    product_name: str | None = None
+    brand: str | None = None
+    model: str | None = None
+    sku: str | None = None
+    attributes: dict[str, str] = Field(default_factory=dict)
+    quantity: int | None = Field(default=None, ge=1)
+    wholesale_required: bool = Field(default=False)
+    budget: float | None = Field(default=None, ge=0)
+    destination: str | None = None
+    search_queries: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    missing_information: list[str] = Field(default_factory=list)
+
+
+class SupplierResult(BaseModel):
+    """A real retrieved supplier/product result.
+
+    Missing fields stay null. The system never invents supplier, price, MOQ,
+    shipping, rating, URL, or availability values.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    title: str
+    supplier: str | None = None
+    product: str | None = None
+    price: float | None = None
+    currency: str | None = None
+    url: str | None = None
+    source: str
+    image_url: str | None = None
+    moq: int | None = Field(default=None, ge=1)
+    availability: str | None = None
+    shipping: str | None = None
+    rating: float | None = Field(default=None, ge=0, le=5)
+    source_timestamp: str | None = None
+    match_info: dict[str, Any] = Field(default_factory=dict)
+
+
+class VerificationState(str, Enum):
+    VERIFIED = "verified"
+    PARTIALLY_VERIFIED = "partially_verified"
+    UNVERIFIED = "unverified"
+
+
+class VerificationResult(BaseModel):
+    """Verification outcome for one supplier result. Never upgrades an
+    unverified source to verified without real evidence."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    result_index: int
+    state: VerificationState = VerificationState.UNVERIFIED
+    checks: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class ComparisonOption(BaseModel):
+    """One retrievable option positioned in the comparison. Category flags are
+    set only when enough real data exists; an option may be more than one."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    result_index: int
+    supplier: str | None = None
+    product: str | None = None
+    unit_price: float | None = None
+    currency: str | None = None
+    moq: int | None = None
+    shipping: str | None = None
+    availability: str | None = None
+    verification: VerificationState = VerificationState.UNVERIFIED
+    source: str | None = None
+    url: str | None = None
+    is_cheapest: bool = False
+    is_best_value: bool = False
+    is_best_supplier: bool = False
+
+
+class Recommendation(BaseModel):
+    """Recommendation produced ONLY from comparison results (never AI-invented)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    best_supplier: ComparisonOption | None = None
+    cheapest_option: ComparisonOption | None = None
+    best_value: ComparisonOption | None = None
+    reasoning: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    currency_conflict: bool = Field(default=False)
+
+
+class ResearchTextRequest(BaseModel):
+    """Request body for POST /api/v1/research/text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)
+    use_gemini: bool = Field(default=True)
+
+
+class ResearchRouteRequest(BaseModel):
+    """Request body for POST /api/v1/research/route (text or voice-transcribed)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)
+    input_type: str = Field(pattern="^(text|voice)$", default="text")
+    use_gemini: bool = Field(default=True)

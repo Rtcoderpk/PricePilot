@@ -47,6 +47,7 @@ packages = [
     "pricepilot.normalization",
     "pricepilot.monitoring",
     "pricepilot.agents",
+    "pricepilot.research",
     "pricepilot.services",
     "pricepilot.api",
     "pricepilot.api.v1",

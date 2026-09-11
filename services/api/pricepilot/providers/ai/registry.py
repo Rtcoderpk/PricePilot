@@ -10,6 +10,7 @@ from __future__ import annotations
 from pricepilot.config import settings
 from pricepilot.logging import get_logger
 from pricepilot.providers.ai import AIProvider, NoopAIProvider
+from pricepilot.providers.ai.gemini import GeminiProvider
 from pricepilot.providers.ai.ollama import OllamaProvider
 from pricepilot.providers.ai.openai_compatible import OpenAICompatibleProvider
 
@@ -27,7 +28,9 @@ def build_ai_providers() -> list[AIProvider]:
     """Build all configured AI providers, best-first for fallback ordering."""
     providers: list[AIProvider] = []
     for name in _configured_names():
-        if name == "openai-compatible":
+        if name == "gemini":
+            providers.append(GeminiProvider())
+        elif name == "openai-compatible":
             providers.append(OpenAICompatibleProvider())
         elif name == "ollama":
             providers.append(OllamaProvider())
