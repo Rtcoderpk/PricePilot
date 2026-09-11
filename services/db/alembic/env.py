@@ -19,11 +19,17 @@ target_metadata = Base.metadata
 def get_url() -> str:
     """DATABASE_URL wins over alembic.ini so compose/CI can inject it.
 
-    Migrations run on the sync psycopg driver; if the app injected the async
-    (asyncpg) DSN, swap the dialect so engine creation uses a sync driver.
+    Migrations run on the sync `psycopg` (v3) driver. Normalize any of the
+    common DSN forms the app/Supabase may provide — `postgresql+asyncpg://`,
+    plain `postgresql://`, or `postgresql+psycopg://` — to `postgresql+psycopg://`
+    so engine creation never resolves to the (uninstalled) psycopg2 driver.
     """
     url = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
-    return url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
+    if url.startswith("postgresql+asyncpg://"):
+        return "postgresql+psycopg://" + url[len("postgresql+asyncpg://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
 
 
 def run_migrations_offline() -> None:

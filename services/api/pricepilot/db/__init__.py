@@ -26,6 +26,21 @@ class Base(DeclarativeBase):
     pass
 
 
+def _normalize_async_dsn(url: str) -> str:
+    """Ensure the engine uses the asyncpg driver regardless of DSN form.
+
+    Supabase's dashboard supplies plain `postgresql://…` URLs; the app's async
+    engine needs `postgresql+asyncpg://…`. Normalize so either form works.
+    """
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+    if url.startswith("postgres://"):
+        return "postgres+asyncpg://" + url[len("postgres://"):]
+    return url
+
+
+_app_database_url = _normalize_async_dsn(settings.database_url)
+
 # Under tests we use a NullPool: pytest-asyncio gives each test its own event
 # loop, and a shared queued pool would recycle connections across loops
 # (asyncpg "Event loop is closed" cascade on both Windows and CI). NullPool
@@ -48,7 +63,7 @@ else:
         pool_size=pool_size, max_overflow=max_overflow, pool_recycle=pool_recycle
     )
 
-engine = create_async_engine(settings.database_url, **_engine_kwargs)
+engine = create_async_engine(_app_database_url, **_engine_kwargs)
 
 SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
