@@ -178,3 +178,22 @@ def test_research_image_requires_auth_or_file(client):
     # Empty upload → 422 (no file) rather than crash.
     r = client.post("/api/v1/research/image")
     assert r.status_code in (400, 422)
+
+
+def test_research_image_honest_notice_without_vision(client):
+    """A real PNG upload with no vision provider returns an honest notice and no
+    fabricated suppliers (anti-hallucination)."""
+    import io
+
+    png = (
+        b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    r = client.post(
+        "/api/v1/research/image",
+        files={"file": ("p.png", io.BytesIO(png), "image/png")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["suppliers"] == []  # no fake suppliers
+    assert body["recommendation"] is None
+    assert body.get("notice")  # honest explanation (vision not configured)
