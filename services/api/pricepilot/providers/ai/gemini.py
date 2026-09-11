@@ -7,7 +7,7 @@ The model only extracts/understands; retrieval data must come from providers.
 
 Config (env):
   AI_API_KEY       — Google AI Studio API key
-  AI_MODEL         — Gemini model id (e.g. gemini-2.0-flash)
+  AI_MODEL         — Gemini model id (e.g. gemini-2.5-flash)
   AI_BASE_URL      — defaults to https://generativelanguage.googleapis.com/v1beta/openai
 """
 
@@ -61,7 +61,7 @@ class GeminiProvider(AIProvider):
         timeout: float = 60.0,
     ) -> None:
         self.api_key = api_key or settings.ai_api_key
-        self.model = model or settings.ai_model or "gemini-2.0-flash"
+        self.model = model or settings.ai_model or "gemini-2.5-flash"
         self.base_url = (base_url or settings.ai_base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 

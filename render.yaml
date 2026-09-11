@@ -39,7 +39,7 @@ services:
       - key: AI_PROVIDER
         value: openai-compatible
       - key: AI_MODEL
-        value: gemini-2.0-flash
+        value: gemini-2.5-flash
       - key: AI_API_KEY
         sync: false
       - key: AI_BASE_URL
