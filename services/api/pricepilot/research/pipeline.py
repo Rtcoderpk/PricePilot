@@ -66,6 +66,21 @@ async def run_text_research(
             break
     _stage("SEARCH", request_id, started, f"results={len(results)}")
 
+    # Jina Page Reader enrichment for candidate URLs (Section 12)
+    from pricepilot.services.jina_reader import read_live_page
+    for r in results[:3]:
+        if r.url:
+            try:
+                page_info = await read_live_page(r.url, timeout=5.0)
+                if page_info.get("status") == "success":
+                    if page_info.get("price") is not None:
+                        r.price = page_info["price"]
+                        r.currency = page_info.get("currency") or r.currency
+                    if page_info.get("stock"):
+                        r.availability = page_info["stock"]
+            except Exception:
+                pass
+
     if cache is not None and cache_key and results:
         await _set_cached(cache, cache_key, results)
 

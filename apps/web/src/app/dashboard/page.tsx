@@ -29,10 +29,20 @@ export default function DashboardPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [t, a, mon] = await Promise.all([trackingList(), alertsList(true), monitoringStatus()]);
-        setTracks(t);
-        setAlerts(a);
-        setMonitorInfo(mon);
+        const [tRes, aRes, monRes] = await Promise.allSettled([
+          trackingList(),
+          alertsList(true),
+          monitoringStatus(),
+        ]);
+
+        if (tRes.status === "fulfilled") setTracks(tRes.value);
+        if (aRes.status === "fulfilled") setAlerts(aRes.value);
+        if (monRes.status === "fulfilled") setMonitorInfo(monRes.value);
+
+        if (tRes.status === "rejected" && aRes.status === "rejected" && monRes.status === "rejected") {
+          const firstErr = tRes.reason;
+          setError(firstErr instanceof Error ? firstErr.message : "Failed to load dashboard data.");
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load dashboard.");
       } finally {

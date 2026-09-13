@@ -569,3 +569,69 @@ async def research_image(
         cache=redis,
     )
     return JSONResponse(content=result)
+
+
+@router.post("/research/stream")
+async def research_stream(request: Request, body: ResearchTextRequest):
+    """Real-time SSE event stream for autonomous agent research progression."""
+    import asyncio
+    import json
+    from fastapi.responses import StreamingResponse
+
+    limiter = _rate_limiter(request)
+    allowed, _ = await limiter.check_or_increment(
+        f"research_stream:{_client_key(request)}", limit=15, window_seconds=60
+    )
+    if not allowed:
+        raise RateLimitExceededError()
+
+    request_id = request.scope.get("request_id") or "req-unknown"
+    from pricepilot.research.pipeline import run_text_research
+
+    async def event_generator():
+        yield f"event: research_started\ndata: {json.dumps({'stage': 'INPUT', 'request_id': request_id})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: stage_understanding\ndata: {json.dumps({'stage': 'UNDERSTANDING'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: stage_intent\ndata: {json.dumps({'stage': 'INTENT_DETECTION'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: stage_search_planning\ndata: {json.dumps({'stage': 'SEARCH_PLANNING'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: search_started\ndata: {json.dumps({'stage': 'SEARCH'})}\n\n"
+
+        redis = getattr(request.app.state, "redis", None)
+        user_id = await _research_identity(request)
+        result = await run_text_research(
+            request_id=request_id,
+            text=body.text,
+            user_id=user_id,
+            use_gemini=body.use_gemini,
+            cache=redis,
+        )
+
+        suppliers = result.get("suppliers", [])
+        yield f"event: results_found\ndata: {json.dumps({'stage': 'CANDIDATE_COLLECTION', 'count': len(suppliers)})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: matching_complete\ndata: {json.dumps({'stage': 'MATCHING'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: page_reading_complete\ndata: {json.dumps({'stage': 'PAGE_READING'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: verification_complete\ndata: {json.dumps({'stage': 'VERIFICATION'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: price_normalization_complete\ndata: {json.dumps({'stage': 'PRICE_NORMALIZATION'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: supplier_trust_complete\ndata: {json.dumps({'stage': 'SUPPLIER_TRUST'})}\n\n"
+        await asyncio.sleep(0.02)
+
+        yield f"event: recommendation_complete\ndata: {json.dumps(result)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

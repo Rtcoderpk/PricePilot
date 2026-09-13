@@ -69,8 +69,15 @@ class Settings(BaseSettings):
     pricepilot_vision_provider: str = Field(default="")
     pricepilot_review_provider: str = Field(default="")
 
+    # --- Search & Page Reader APIs ---
+    google_cse_api_key: str | None = Field(default=None)
+    google_cse_cx: str | None = Field(default=None)
+    tavily_api_key: str | None = Field(default=None)
+    serper_api_key: str | None = Field(default=None)
+    jina_api_key: str | None = Field(default=None)
+
     # --- Search providers ---
-    pricepilot_search_provider: str = Field(default="openfoodfacts")
+    pricepilot_search_provider: str = Field(default="google_cse,tavily,serper,web_search,wholesale_supplier")
     off_api_base_url: str = Field(default="https://world.openfoodfacts.org")
     off_timeout_seconds: float = Field(default=12.0)
     off_max_page_size: int = Field(default=20)

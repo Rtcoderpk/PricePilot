@@ -98,9 +98,16 @@ async def unhandled_error_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"error": error.to_dict()})
 
 
+def _parse_cors_origins(raw: str) -> list[str]:
+    if not raw or raw.strip() == "*":
+        return ["*"]
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["*"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.cors_origin],
+    allow_origins=_parse_cors_origins(settings.cors_origin),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

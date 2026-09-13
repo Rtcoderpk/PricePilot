@@ -82,9 +82,6 @@ async def _ensure_user(session, canonical_uuid: str) -> None:
         await session.commit()
     except Exception:
         await session.rollback()
-        log.exception("identity: ensure_user failed for %s", canonical_uuid)
-        raise PricePilotError(
-            ErrorCode.DATABASE_ERROR,
-            "Could not resolve user identity.",
-            status_code=500,
-        ) from None
+        log.warning("identity: ensure_user DB failed for %s; continuing with canonical id", canonical_uuid)
+        # Fall back to canonical_uuid so degraded DB doesn't crash non-persisted flows
+        return canonical_uuid

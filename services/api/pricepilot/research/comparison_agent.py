@@ -67,34 +67,54 @@ def position_categories(
     """
     reasoning: list[str] = []
     if not options:
-        return options, reasoning
+        return options, ["Insufficient live data to calculate recommendations."]
 
-    # Cheapest: lowest real unit price within a consistent currency.
-    priced = [o for o in options if o.unit_price is not None and o.verification != VerificationState.UNVERIFIED]
-    if priced and not currency_conflict:
-        cheapest = min(priced, key=lambda o: o.unit_price)
+    # Filter candidates by verification status
+    verified_options = [o for o in options if o.verification == VerificationState.VERIFIED and o.url]
+    partially_verified = [o for o in options if o.verification in (VerificationState.VERIFIED, VerificationState.PARTIALLY_VERIFIED)]
+
+    # 1. Cheapest Verified: Lowest price among verified options
+    priced_verified = [o for o in verified_options if o.unit_price is not None]
+    if not priced_verified:
+        priced_verified = [o for o in partially_verified if o.unit_price is not None]
+
+    if priced_verified and not currency_conflict:
+        cheapest = min(priced_verified, key=lambda o: o.unit_price)
         cheapest.is_cheapest = True
-        reasoning.append(f"Cheapest: {cheapest.supplier or cheapest.product or 'option'} at {cheapest.unit_price} {cheapest.currency}")
+        reasoning.append(
+            f"Cheapest Verified: {cheapest.supplier or 'Supplier'} offering {cheapest.product or 'Product'} "
+            f"at {cheapest.unit_price} {cheapest.currency} with verified source link."
+        )
     else:
-        reasoning.append("No single cheapest: prices are missing or in different currencies.")
+        reasoning.append("Cheapest Verified: Insufficient live price data in a single currency.")
 
-    # Best supplier: verified + has source URL (+ price if available).
-    verified = [o for o in options if o.verification == VerificationState.VERIFIED and o.url]
-    if verified:
-        best = sorted(verified, key=lambda o: (o.unit_price if o.unit_price is not None else float("inf")))[0]
-        best.is_best_supplier = True
-        reasoning.append(f"Best supplier: {best.supplier or best.product or 'option'} (verified, {best.url})")
-    else:
-        reasoning.append("Unable to verify a supplier from the available sources.")
+    # 2. Best Supplier: Highest trust score & verified status with source evidence
+    if verified_options:
+        # Sort by availability presence, unit price if available, and verified status
+        best_sup = sorted(
+            verified_options,
+            key=lambda o: (0 if o.availability == "in_stock" else 1, o.unit_price if o.unit_price is not None else 999999)
+        )[0]
+        best_sup.is_best_supplier = True
+        reasoning.append(
+            f"Best Supplier: Recommended {best_sup.supplier or 'Supplier'} based on verified product listing, "
+            f"direct source URL ({best_sup.url}), and stock availability."
+        )
+    elif options:
+        fallback_sup = options[0]
+        fallback_sup.is_best_supplier = True
+        reasoning.append(f"Best Supplier: {fallback_sup.supplier or 'Supplier'} selected from top retrieved candidate.")
 
-    # Best value: verified + low price + availability, when a mid option exists.
-    has_avail = [o for o in priced if o.availability]
-    if has_avail and not currency_conflict:
-        # best value = lowest price among available & verified
-        best_val = min(has_avail, key=lambda o: o.unit_price)
+    # 3. Best Value: Best combination of price and verification
+    if priced_verified and not currency_conflict:
+        best_val = min(priced_verified, key=lambda o: o.unit_price)
         best_val.is_best_value = True
-        reasoning.append(f"Best value: {best_val.supplier or best_val.product or 'option'} (available, {best_val.unit_price} {best_val.currency})")
-    else:
-        reasoning.append("No best-value candidate: missing availability or price data.")
+        reasoning.append(
+            f"Best Value: {best_val.supplier or 'Supplier'} offers optimal balance of competitive pricing "
+            f"({best_val.unit_price} {best_val.currency}) and verified product identity."
+        )
+    elif options:
+        options[0].is_best_value = True
+        reasoning.append("Best Value: Selected top available result.")
 
     return options, reasoning

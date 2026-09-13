@@ -46,11 +46,11 @@ def route_text(text: str, *, use_gemini: bool = False) -> ProductQuery:
     if not cleaned:
         return ProductQuery(confidence=0.0, missing_information=["request"])
 
-    # quantity
+    # quantity — parse only when explicit quantity context/keywords exist
     quantity = None
-    m = re.search(r"(\d{2,6})\s*(?:units|pcs|pieces|pairs|packs?)", lower)
+    m = re.search(r"\b(\d{1,6})\s*(?:units|pcs|pieces|pairs|packs?|items?|qty|quantity)\b", lower)
     if not m:
-        m = _QUANTITY_RE.search(lower)
+        m = re.search(r"\b(?:qty|quantity|count|buy|order|need)\s*(?:of\s*)?(\d{1,6})\b", lower)
     if m:
         try:
             q = int(m.group(1))
@@ -71,11 +71,14 @@ def route_text(text: str, *, use_gemini: bool = False) -> ProductQuery:
         if m:
             budget = float(m.group(1))
 
-    # wholesale vs retail
+    # intelligent cross-mode intent detection (Section 8)
     wholesale = any(h in lower for h in _WHOLESALE_HINTS)
-    if not wholesale:
+    if quantity and quantity >= 10:
+        wholesale = True
+    elif not wholesale:
         retail = any(h in lower for h in _RETAIL_HINTS)
-        wholesale = not retail
+        if retail:
+            wholesale = False
 
     # category/brand best-effort tokens
     category = None
@@ -89,21 +92,16 @@ def route_text(text: str, *, use_gemini: bool = False) -> ProductQuery:
             brand = b
             break
 
-    # search queries
-    search_queries: list[str] = []
-    if brand:
-        search_queries.append(f"{brand} {category or ''}".strip())
-        if wholesale:
-            search_queries.append(f"{brand} {category or ''} wholesale".strip())
-        if quantity:
-            search_queries.append(f"{brand} {category or ''} {quantity}".strip())
-    elif category:
-        search_queries.append(category)
-        if wholesale:
-            search_queries.append(f"{category} wholesale".strip())
-            search_queries.append(f"{category} supplier".strip())
-    if not search_queries:
-        search_queries.append(cleaned)
+    # multi-query search planner strategy (Section 7)
+    base_phrase = f"{brand or ''} {category or cleaned}".strip()
+    search_queries: list[str] = [
+        base_phrase,  # Primary
+        f"{base_phrase} buy price store".strip(),  # Retail
+        f"{base_phrase} wholesale supplier B2B".strip(),  # Wholesale
+        f"{base_phrase} official manufacturer".strip(),  # Manufacturer
+    ]
+    if "pakistan" in lower or "pk" in lower:
+        search_queries.append(f"{base_phrase} Pakistan".strip())
 
     if not category and not brand:
         missing.append("product_type")

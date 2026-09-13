@@ -89,6 +89,14 @@ export async function getHealth(): Promise<{ status: string }> {
   return parseResponse<{ status: string }>(res);
 }
 
+export async function getDiagnostics(): Promise<{
+  status: string;
+  diagnostics: Array<{ provider: string; status: string; latency_ms: number; error: string | null }>;
+}> {
+  const res = await fetch(`${API_BASE}/diagnostics`, { cache: "no-store" });
+  return parseResponse(res);
+}
+
 export function apiBaseUrl(): string {
   return API_BASE;
 }

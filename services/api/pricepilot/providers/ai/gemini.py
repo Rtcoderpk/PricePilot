@@ -177,22 +177,16 @@ class GeminiProvider(AIProvider):
         return cleaned
 
 
-def _parse_json_to_schema(content: str, schema: type[BaseModel]) -> BaseModel:
+def _parse_json_to_schema(content: str | dict | list, schema: type[BaseModel]) -> BaseModel:
     if isinstance(content, dict | list):
         raw: object = content
     elif isinstance(content, str):
+        cleaned = content.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+            cleaned = cleaned.rsplit("```", 1)[0].strip()
         try:
-            raw = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ProviderError("gemini", "model returned malformed JSON") from exc
-    else:
-        raise ProviderError("gemini", "model returned unexpected output type")
-    try:
-        return schema.model_validate(raw)
-    except Exception as exc:
-        raise ProviderError("gemini", f"model output failed validation: {exc.__class__.__name__}") from exc
-        try:
-            raw = json.loads(content)
+            raw = json.loads(cleaned)
         except json.JSONDecodeError as exc:
             raise ProviderError("gemini", "model returned malformed JSON") from exc
     else:

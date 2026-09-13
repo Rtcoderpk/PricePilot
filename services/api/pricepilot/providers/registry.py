@@ -13,12 +13,22 @@ from pricepilot.config import settings
 from pricepilot.logging import get_logger
 from pricepilot.models import ProviderStatus
 from pricepilot.providers.search import NoopSearchProvider, SearchProvider
+from pricepilot.providers.search.google_cse import GoogleCSEProvider
 from pricepilot.providers.search.openfoodfacts import OpenFoodFactsProvider
+from pricepilot.providers.search.serper import SerperSearchProvider
+from pricepilot.providers.search.tavily import TavilySearchProvider
+from pricepilot.providers.search.web_search import WebSearchProvider
+from pricepilot.providers.search.wholesale_supplier import WholesaleSupplierProvider
 
 log = get_logger("providers.registry")
 
 # Canonical search-provider names → builders.
 _PROVIDER_BUILDERS = {
+    "google_cse": GoogleCSEProvider,
+    "tavily": TavilySearchProvider,
+    "serper": SerperSearchProvider,
+    "web_search": WebSearchProvider,
+    "wholesale_supplier": WholesaleSupplierProvider,
     "openfoodfacts": OpenFoodFactsProvider,
 }
 
@@ -26,8 +36,9 @@ _PROVIDER_BUILDERS = {
 def _configured_names() -> list[str]:
     raw = (settings.pricepilot_search_provider or "").strip().lower()
     if not raw:
-        return []
-    return [name.strip() for name in raw.split(",") if name.strip()]
+        return ["google_cse", "tavily", "serper", "web_search", "wholesale_supplier"]
+    names = [name.strip() for name in raw.split(",") if name.strip()]
+    return names if names else ["google_cse", "tavily", "serper", "web_search", "wholesale_supplier"]
 
 
 def build_providers() -> list[SearchProvider]:
